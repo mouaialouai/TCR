@@ -1,0 +1,1994 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import { 
+  Calculator, 
+  Table as TableIcon, 
+  Edit3, 
+  Copy, 
+  Trash2, 
+  Download,
+  Check,
+  Smartphone,
+  PieChart,
+  HardDrive,
+  PlusCircle,
+  TrendingDown,
+  Trash,
+  Info,
+  Users,
+  LayoutDashboard,
+  Wallet,
+  TrendingUp,
+  UsersRound,
+  LineChart as LineChartIcon,
+  BarChart as BarChartIcon,
+  Activity,
+  Fuel,
+  Settings,
+  Wrench,
+  FileSpreadsheet,
+  Undo2,
+  Redo2,
+  BookOpen,
+  History,
+  Clock,
+  Search,
+  X,
+  Mail,
+  Phone,
+  GraduationCap,
+  HardHat,
+  ExternalLink,
+  Mountain,
+  Building
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  Legend, 
+  ResponsiveContainer, 
+  LineChart, 
+  Line, 
+  AreaChart, 
+  Area,
+  PieChart as RechartsPieChart,
+  Pie,
+  Cell
+} from 'recharts';
+import { cn } from './lib/utils';
+import { AnnualData, Equipment, EmployeeRole, HRConfig, OperationalMachine, OperationalConfig, InvestmentCategory, CalculationSnapshot } from './types';
+import { calculateYear, calculateTotals, getAmortizationSchedule, getHRCosts, getOperationalCosts } from './lib/calculations';
+import { KOTLIN_VIEWMODEL, LAYOUT_XML } from './lib/androidCodeTemplates';
+
+const INITIAL_YEARS: AnnualData[] = Array.from({ length: 10 }, (_, i) => ({
+  year: i + 1,
+  extractionGranite: 0,
+  caGranite: 0,
+  extractionTuf: 0,
+  caTuf: 0,
+  matieresFournitures: 0,
+  services: 0,
+  fraisPersonnel: 0,
+  impotsTaxes: 0,
+  fraisFinanciers: 0,
+  dotationsAmortissements: 0,
+}));
+
+const INITIAL_EQUIPMENTS: Equipment[] = [
+  { id: '1', designation: 'Camion (18 m3)', price: 11000000, duration: 5, category: "Équipements Lourds & Matériel", allocation: 'Common' },
+  { id: '2', designation: 'Chargeuse sur pneu', price: 12500000, duration: 5, category: "Équipements Lourds & Matériel", allocation: 'Common' },
+  { id: '3', designation: 'Camion-citerne', price: 8500000, duration: 5, category: "Équipements Lourds & Matériel", allocation: 'Common' },
+  { id: '4', designation: 'Véhicule tout terrain', price: 4000000, duration: 5, category: "Équipements Lourds & Matériel", allocation: 'Common' },
+  { id: '5', designation: 'Groupe Electrogène', price: 200000, duration: 5, category: "Équipements Lourds & Matériel", allocation: 'Common' },
+  { id: '6', designation: 'Acquisition de Titre', price: 1000000, duration: 5, category: "Frais préliminaires & Exploration", allocation: 'Common' },
+  { id: '7', designation: 'Etudes générales', price: 500000, duration: 5, category: "Frais préliminaires & Exploration", allocation: 'Common' },
+  { id: '8', designation: 'Travaux préparatoires', price: 3000000, duration: 0, category: "Infrastructures & Bâtiments", allocation: 'Common' },
+  { id: '9', designation: 'Remise en état des lieux', price: 500000, duration: 0, category: "Infrastructures & Bâtiments", allocation: 'Common' },
+];
+
+// Custom Hook for LocalStorage Persistence
+function useLocalStorage<T>(key: string, initialValue: T) {
+  // State to store our value
+  // Pass initial state function to useState so logic is only executed once
+  const [storedValue, setStoredValue] = useState<T>(() => {
+    try {
+      const item = window.localStorage.getItem(key);
+      return item ? JSON.parse(item) : initialValue;
+    } catch (error) {
+      console.error(`Error reading localStorage key "${key}":`, error);
+      return initialValue;
+    }
+  });
+
+  // Return a wrapped version of useState's setter function that
+  // persists the new value to localStorage.
+  const setValue = (value: T | ((val: T) => T)) => {
+    try {
+      // Allow value to be a function so we have same API as useState
+      const valueToStore = value instanceof Function ? value(storedValue) : value;
+      setStoredValue(valueToStore);
+      window.localStorage.setItem(key, JSON.stringify(valueToStore));
+    } catch (error) {
+      console.error(`Error saving to localStorage key "${key}":`, error);
+    }
+  };
+
+  return [storedValue, setValue] as const;
+}
+
+export default function App() {
+  const [userNotes, setUserNotes] = useLocalStorage<string>('app_user_notes', '');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'edit' | 'table' | 'invest' | 'hr' | 'ops' | 'charts' | 'history' | 'code' | 'about' | 'help'>('dashboard');
+  const [years, setYears] = useLocalStorage<AnnualData[]>('app_tcr_data', INITIAL_YEARS);
+  const [equipments, setEquipments] = useLocalStorage<Equipment[]>('app_investissements', INITIAL_EQUIPMENTS);
+  const [ibmRate, setIbmRate] = useLocalStorage<number>('app_settings_ibm', 0.12);
+
+  // New HR State
+  const [roles, setRoles] = useLocalStorage<EmployeeRole[]>('app_employes', []);
+  const [hrConfig, setHrConfig] = useLocalStorage<HRConfig>('app_hr_config', {
+    socialChargesRate: 0.26,
+    annualIncreaseRate: 0.03,
+    paidMonths: 12
+  });
+
+  // New Operational State
+  const [machines, setMachines] = useLocalStorage<OperationalMachine[]>('app_operational_machines', []);
+  const [opConfig, setOpConfig] = useLocalStorage<OperationalConfig>('app_operational_config', {
+    fuelPrice: 29,
+    workDaysPerYear: 250,
+    annualInflationRate: 3
+  });
+
+  const [isSettingsExpanded, setIsSettingsExpanded] = useState(false);
+  
+  // History for Undo/Redo (Persisted for historical viewing)
+  const [history, setHistory] = useLocalStorage<CalculationSnapshot[]>('app_calculation_history', []);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [historySearchQuery, setHistorySearchQuery] = useState('');
+
+  const filteredHistory = useMemo(() => {
+    if (!historySearchQuery.trim()) return history;
+    const query = historySearchQuery.toLowerCase().trim();
+    return history.filter(snapshot => {
+      const label = (snapshot.label || "").toLowerCase();
+      const date = new Date(snapshot.timestamp);
+      const dateStr = date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }).toLowerCase();
+      const timeStr = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }).toLowerCase();
+      return label.includes(query) || dateStr.includes(query) || timeStr.includes(query);
+    });
+  }, [history, historySearchQuery]);
+
+  const pushToHistory = (data: AnnualData[], label?: string) => {
+    const newSnapshot: CalculationSnapshot = {
+      id: Math.random().toString(36).substr(2, 9),
+      timestamp: new Date().toISOString(),
+      data: JSON.parse(JSON.stringify(data)),
+      label: label
+    };
+    const newHistory = history.slice(0, historyIndex + 1);
+    newHistory.push(newSnapshot);
+    if (newHistory.length > 50) newHistory.shift();
+    setHistory(newHistory);
+    setHistoryIndex(newHistory.length - 1);
+  };
+
+  const undo = () => {
+    if (historyIndex > 0) {
+      const prevIndex = historyIndex - 1;
+      const prevState = history[prevIndex];
+      setYears(JSON.parse(JSON.stringify(prevState.data)));
+      setHistoryIndex(prevIndex);
+    }
+  };
+
+  const redo = () => {
+    if (historyIndex < history.length - 1) {
+      const nextIndex = historyIndex + 1;
+      const nextState = history[nextIndex];
+      setYears(JSON.parse(JSON.stringify(nextState.data)));
+      setHistoryIndex(nextIndex);
+    }
+  };
+
+  // Initialize history
+  useEffect(() => {
+    if (historyIndex === -1 && years.length > 0) {
+      if (history.length > 0) {
+        setHistoryIndex(history.length - 1);
+      } else {
+        const initialSnapshot: CalculationSnapshot = {
+          id: 'initial',
+          timestamp: new Date().toISOString(),
+          data: JSON.parse(JSON.stringify(years)),
+          label: 'État Initial'
+        };
+        setHistory([initialSnapshot]);
+        setHistoryIndex(0);
+      }
+    }
+  }, [years, historyIndex, history]);
+
+  // Initial snapshots for specific actions
+  const saveManualSnapshot = () => {
+    const label = window.prompt("Nom de la simulation :", `Simulation ${history.length + 1}`);
+    if (label !== null) {
+      pushToHistory(years, label || `Simulation ${history.length + 1}`);
+    }
+  };
+
+  // Reset Application Data
+  const handleResetData = () => {
+    if (window.confirm("Êtes-vous sûr de vouloir réinitialiser toutes les données ? Cette action est irréversible et effacera toute votre étude en cours.")) {
+      window.localStorage.clear();
+      window.location.reload();
+    }
+  };
+  
+  // New operational form state
+  const [newOpName, setNewOpName] = useState('');
+  const [newOpCons, setNewOpCons] = useState('');
+  const [newOpHours, setNewOpHours] = useState('');
+  const [newOpValue, setNewOpValue] = useState('');
+  const [newOpMaint, setNewOpMaint] = useState('5');
+  const [newOpAlloc, setNewOpAlloc] = useState<'Granite' | 'Tuf' | 'Common'>('Common');
+  
+  // New roles form state
+  const [newRoleName, setNewRoleName] = useState('');
+  const [newRoleCount, setNewRoleCount] = useState('');
+  const [newRoleSalary, setNewRoleSalary] = useState('');
+  const [newRoleAlloc, setNewRoleAlloc] = useState<'Granite' | 'Tuf' | 'Common'>('Common');
+  
+  // New equipment form state
+  const [newEqName, setNewEqName] = useState('');
+  const [newEqPrice, setNewEqPrice] = useState('');
+  const [newEqDuration, setNewEqDuration] = useState('');
+  const [newEqCategory, setNewEqCategory] = useState<InvestmentCategory>("Équipements Lourds & Matériel");
+  const [newEqAlloc, setNewEqAlloc] = useState<'Granite' | 'Tuf' | 'Common'>('Common');
+
+  // 1. Calculate Amortization Schedule
+  const amortResults = useMemo(() => getAmortizationSchedule(equipments), [equipments]);
+  
+  // 2. Calculate HR Costs Projection
+  const hrTotals = useMemo(() => getHRCosts(roles, hrConfig), [roles, hrConfig]);
+
+  // 3. Calculate Operational Costs (Fuel & Maintenance)
+  const opResults = useMemo(() => getOperationalCosts(machines, opConfig), [machines, opConfig]);
+  
+  // 5. Sync Automated Results into Years State (Manual Override Support)
+  useEffect(() => {
+    setYears(prev => prev.map((y, idx) => {
+      const fuelTotal = opResults.fuel.granite[idx] + opResults.fuel.tuf[idx] + opResults.fuel.common[idx];
+      const maintTotal = opResults.maintenance.granite[idx] + opResults.maintenance.tuf[idx] + opResults.maintenance.common[idx];
+      const hrTotal = hrTotals.granite[idx] + hrTotals.tuf[idx] + hrTotals.common[idx];
+      const amortTotal = amortResults.annualTotals.granite[idx] + amortResults.annualTotals.tuf[idx] + amortResults.annualTotals.common[idx];
+      
+      return {
+        ...y,
+        dotationsAmortissements: amortTotal,
+        fraisPersonnel: hrTotal,
+        matieresFournitures: fuelTotal,
+        services: maintTotal
+      };
+    }));
+  }, [amortResults, hrTotals, opResults]);
+
+  // 6. Final TCR Calculation (using the synced years state)
+  const calculatedYears = useMemo(() => 
+    years.map((y, idx) => calculateYear(y, ibmRate, opResults.fuel, opResults.maintenance, hrTotals, amortResults.annualTotals, idx)), 
+  [years, ibmRate, opResults, hrTotals, amortResults]);
+
+  const totalRow = useMemo(() => calculateTotals(calculatedYears), [calculatedYears]);
+  const totalInvestment = useMemo(() => equipments.reduce((sum, e) => sum + e.price, 0), [equipments]);
+
+  const handleUpdateYear = (yearIndex: number, field: keyof AnnualData, value: number) => {
+    const newYears = [...years];
+    newYears[yearIndex] = { ...newYears[yearIndex], [field]: value };
+    setYears(newYears);
+    // Debounced or throttled push would be better, but for simplicity we push major changes or label them
+    if (field === 'extractionGranite' || field === 'extractionTuf') {
+      pushToHistory(newYears, `Modif. Production Année ${yearIndex + 1}`);
+    }
+  };
+
+  const addEquipment = () => {
+    if (!newEqName || !newEqPrice) return;
+    const eq: Equipment = {
+      id: Math.random().toString(36).substr(2, 9),
+      designation: newEqName,
+      price: Number(newEqPrice),
+      duration: Number(newEqDuration) || 0,
+      category: newEqCategory,
+      allocation: newEqAlloc
+    };
+    setEquipments([...equipments, eq]);
+    setNewEqName('');
+    setNewEqPrice('');
+    setNewEqDuration('');
+  };
+
+  const removeEquipment = (id: string) => {
+    setEquipments(equipments.filter(e => e.id !== id));
+  };
+
+  const addRole = () => {
+    if (!newRoleName || !newRoleCount || !newRoleSalary) return;
+    const role: EmployeeRole = {
+      id: Math.random().toString(36).substr(2, 9),
+      designation: newRoleName,
+      count: Number(newRoleCount),
+      monthlySalary: Number(newRoleSalary),
+      allocation: newRoleAlloc
+    };
+    setRoles([...roles, role]);
+    setNewRoleName('');
+    setNewRoleCount('');
+    setNewRoleSalary('');
+  };
+
+  const removeRole = (id: string) => {
+    setRoles(roles.filter(r => r.id !== id));
+  };
+
+  const addMachine = () => {
+    if (!newOpName || !newOpCons || !newOpHours || !newOpValue) return;
+    const machine: OperationalMachine = {
+      id: Math.random().toString(36).substr(2, 9),
+      designation: newOpName,
+      hourlyConsumption: Number(newOpCons),
+      hoursPerDay: Number(newOpHours),
+      assetValue: Number(newOpValue),
+      maintenanceRate: Number(newOpMaint),
+      allocation: newOpAlloc
+    };
+    setMachines([...machines, machine]);
+    resetOpForm();
+  };
+
+  const resetOpForm = () => {
+    setNewOpName('');
+    setNewOpCons('');
+    setNewOpHours('');
+    setNewOpValue('');
+    setNewOpMaint('5');
+    setNewOpAlloc('Common');
+  };
+
+  const removeMachine = (id: string) => {
+    setMachines(machines.filter(m => m.id !== id));
+  };
+
+  const formatCurrency = (n: number) => {
+    if (n === undefined || n === null || isNaN(n)) return '0';
+    return new Intl.NumberFormat('fr-DZ', { style: 'decimal', maximumFractionDigits: 0 }).format(n);
+  };
+  const formatFormatWithUnit = (n: number) => `${formatCurrency(n)} DA`;
+  const formatCompact = (n: number) => {
+    if (n === undefined || n === null || isNaN(n)) return '0';
+    try {
+      return n.toLocaleString('fr-DZ', { maximumFractionDigits: 2 });
+    } catch (e) {
+      return '0';
+    }
+  };
+
+  const chartData = useMemo(() => calculatedYears.map(y => ({
+    name: `An ${y.year}`,
+    "Chiffre d'affaires": y.caGlobal,
+    "Frais de Personnel": y.fraisPersonnel,
+    "Matières et Fournitures": y.matieresFournitures,
+    "Amortissements": y.dotationsAmortissements,
+    "Résultat Net": y.resultatNet,
+    "Cash-Flow (FNT)": y.fnt
+  })), [calculatedYears]);
+
+  const costStructureData = useMemo(() => {
+    return [
+      { name: 'Matières', value: totalRow.matieresFournitures, color: '#3b82f6' },
+      { name: 'Services', value: totalRow.services, color: '#ef4444' },
+      { name: 'Personnel', value: totalRow.fraisPersonnel, color: '#10b981' },
+      { name: 'Amortissements', value: totalRow.dotationsAmortissements, color: '#f59e0b' },
+      { name: 'Impôts & Divers', value: totalRow.impotsTaxes + totalRow.fraisFinanciers + totalRow.ibm, color: '#6366f1' },
+    ];
+  }, [totalRow]);
+
+  const handleExportExcel = () => {
+    // BOM for French Excel consistency (UTF-8 with BOM)
+    const BOM = "\uFEFF";
+    const DELIMITER = ";";
+    
+    const headers = [
+      "CATEGORIE",
+      ...calculatedYears.map(y => `Annee ${y.year}`),
+      "TOTAL GLOBAL"
+    ];
+
+    const formatVal = (v: number) => {
+      if (v === undefined || v === null || isNaN(v)) return "0";
+      // Round and format with comma for French Excel
+      return Math.round(v).toString().replace(".", ",");
+    };
+
+    const rows = [
+      ["EXTRACTION GRANITE (T)", ...calculatedYears.map(y => y.extractionGranite), totalRow.extractionGranite],
+      ["EXTRACTION TUF (T)", ...calculatedYears.map(y => y.extractionTuf), totalRow.extractionTuf],
+      ["CHIFFRE AFFAIRES GRANITE (DA)", ...calculatedYears.map(y => y.caGranite), totalRow.caGranite],
+      ["CHIFFRE AFFAIRES TUF (DA)", ...calculatedYears.map(y => y.caTuf), totalRow.caTuf],
+      ["CHIFFRE AFFAIRES GLOBAL (DA)", ...calculatedYears.map(y => y.caGlobal), totalRow.caGlobal],
+      ["Matieres & Four. Cons. (DA)", ...calculatedYears.map(y => y.matieresFournitures), totalRow.matieresFournitures],
+      ["Services (DA)", ...calculatedYears.map(y => y.services), totalRow.services],
+      ["VALEUR AJOUTEE (DA)", ...calculatedYears.map(y => y.valeurAjoutee), totalRow.valeurAjoutee],
+      ["Charges de Personnel (DA)", ...calculatedYears.map(y => y.fraisPersonnel), totalRow.fraisPersonnel],
+      ["Impots & Taxes (DA)", ...calculatedYears.map(y => y.impotsTaxes), totalRow.impotsTaxes],
+      ["Charges financieres (DA)", ...calculatedYears.map(y => y.fraisFinanciers), totalRow.fraisFinanciers],
+      ["Dotations aux amortissements (DA)", ...calculatedYears.map(y => y.dotationsAmortissements), totalRow.dotationsAmortissements],
+      ["RESULTAT D'EXPLOITATION (DA)", ...calculatedYears.map(y => y.resultatExploitation), totalRow.resultatExploitation],
+      ["Impots sur les benefices (IBM) (DA)", ...calculatedYears.map(y => y.ibm), totalRow.ibm],
+      ["RESULTAT NET (DA)", ...calculatedYears.map(y => y.resultatNet), totalRow.resultatNet],
+      ["CAPACITE D'AUTOFINANCEMENT (FNT) (DA)", ...calculatedYears.map(y => y.fnt), totalRow.fnt],
+      ["PRIX REVIENT GRANITE (DA/T)", ...calculatedYears.map(y => y.prixRevientGranite), totalRow.prixRevientGranite],
+      ["PRIX REVIENT TUF (DA/T)", ...calculatedYears.map(y => y.prixRevientTuf), totalRow.prixRevientTuf],
+    ];
+
+    const csvContent = BOM + [
+      headers.join(DELIMITER),
+      ...rows.map(row => row.map(val => typeof val === 'number' ? formatVal(val) : val).join(DELIMITER))
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Export_TCR_Projet_Tebessa_${new Date().getFullYear()}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const paybackYear = useMemo(() => {
+    let cumulative = -totalInvestment;
+    for (const y of calculatedYears) {
+      cumulative += y.fnt;
+      if (cumulative >= 0) return y.year;
+    }
+    return 'N/A';
+  }, [calculatedYears, totalInvestment]);
+
+  return (
+    <div className="flex h-screen bg-sleek-bg overflow-hidden font-sans">
+      {/* Sidebar - Sleek Theme */}
+      <aside className="w-64 bg-sleek-sidebar text-white flex flex-col shrink-0 overflow-y-auto shadow-2xl z-50">
+        <div className="p-8 pb-10 flex items-center gap-3">
+          <div className="w-8 h-8 bg-sleek-primary rounded-lg flex items-center justify-center shadow-lg shadow-sleek-primary/20">
+            <Calculator size={18} />
+          </div>
+          <span className="font-extrabold text-xl tracking-tight">GraniteApp</span>
+        </div>
+
+        <nav className="flex-1 space-y-1">
+            <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={18} />} label="Dashboard" />
+            <NavItem active={activeTab === 'invest'} onClick={() => setActiveTab('invest')} icon={<HardDrive size={18} />} label="Investissements" />
+            <NavItem active={activeTab === 'hr'} onClick={() => setActiveTab('hr')} icon={<Users size={18} />} label="Ressources Humaines" />
+            <NavItem active={activeTab === 'ops'} onClick={() => setActiveTab('ops')} icon={<Fuel size={18} />} label="Carburant & Maint." />
+            <NavItem active={activeTab === 'edit'} onClick={() => setActiveTab('edit')} icon={<Edit3 size={18} />} label="Saisie TCR" />
+            <NavItem active={activeTab === 'table'} onClick={() => setActiveTab('table')} icon={<TableIcon size={18} />} label="Rapports TCR" />
+            <NavItem active={activeTab === 'charts'} onClick={() => setActiveTab('charts')} icon={<Activity size={18} />} label="Analyses Graphiques" />
+            <NavItem active={activeTab === 'history'} onClick={() => setActiveTab('history')} icon={<History size={18} />} label="Historique" />
+            <NavItem active={activeTab === 'help'} onClick={() => setActiveTab('help')} icon={<BookOpen size={18} />} label="Aide & Manuel" />
+            <NavItem active={activeTab === 'code'} onClick={() => setActiveTab('code')} icon={<Smartphone size={18} />} label="Export Android" />
+            <NavItem active={activeTab === 'about'} onClick={() => setActiveTab('about')} icon={<Info size={18} />} label="À propos" />
+            
+            <div className="mt-8 px-8">
+              <button 
+                onClick={handleResetData}
+                className="w-full flex items-center gap-3 px-4 py-3 text-[10px] font-black uppercase tracking-[2px] text-red-400 hover:text-white hover:bg-red-500/20 border border-red-500/30 rounded-xl transition-all group"
+              >
+                <Trash2 size={16} className="group-hover:scale-110 transition-transform" />
+                Effacer Tout
+              </button>
+            </div>
+        </nav>
+
+          <div className="p-8 border-t border-white/5">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-sleek-primary animate-pulse"></div>
+              <span className="text-[10px] font-bold uppercase tracking-wider opacity-50">Devise: Dinar Algérien (DA)</span>
+            </div>
+            <div className="text-[11px] opacity-30 font-medium">v1.4.0-dz-dinar</div>
+          </div>
+      </aside>
+
+      {/* Main Content Area */}
+      <main className="flex-1 flex flex-col min-w-0 h-screen">
+        {/* Header */}
+        <header className="p-8 pb-4 flex items-center justify-between shrink-0">
+          <div>
+            <h1 className="text-2xl font-bold text-sleek-text-main">
+              {activeTab === 'dashboard' && "Tableau de Bord Exécutif"}
+              {activeTab === 'invest' && "Module Investissements & Amortissements"}
+              {activeTab === 'hr' && "Gestion des Frais de Personnel"}
+              {activeTab === 'ops' && "Calculateur Fuel & Maintenance"}
+              {activeTab === 'edit' && "Prévisions d'Exploitation"}
+              {activeTab === 'table' && "Analyse des Comptes des Résultats"}
+              {activeTab === 'charts' && "Visualisation Graphique du TCR"}
+              {activeTab === 'history' && "Historique des Simulations"}
+              {activeTab === 'code' && "Code Source Android (MVVM)"}
+              {activeTab === 'help' && "Centre d'Aide & Documentation"}
+              {activeTab === 'about' && "À propos du Concepteur"}
+            </h1>
+            <p className="text-sm text-sleek-text-muted mt-1">
+              {activeTab === 'dashboard' && "Vue d'ensemble de la performance et de la rentabilité du projet."}
+              {activeTab === 'invest' && "Gestion des équipements et calcul automatique des annuités."}
+              {activeTab === 'hr' && "Calcul automatique des charges sociales et projection sur 10 ans."}
+              {activeTab === 'ops' && "Pilotage dynamique des consommations et entretien des engins."}
+              {activeTab === 'edit' && "Liaison dynamique totale activée (Amort., RH, Fuel, Maint.)."}
+              {activeTab === 'table' && "Analyse consolidée du projet sur 10 ans."}
+              {activeTab === 'charts' && "Graphiques interactifs des indicateurs de performance."}
+              {activeTab === 'history' && "Journal des modifications et versions précédentes du TCR."}
+              {activeTab === 'help' && "Guide complet des calculs et manuel d'utilisation de l'application."}
+              {activeTab === 'about' && "Informations professionnelles sur le développeur de l'application."}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-4">
+             <div className="flex items-center gap-2 mr-2">
+               <button 
+                 onClick={undo}
+                 disabled={historyIndex <= 0}
+                 className="p-3 bg-white border border-sleek-border rounded-xl shadow-sm text-sleek-text-main hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                 title="Annuler (Undo)"
+               >
+                 <Undo2 size={18} />
+               </button>
+               <button 
+                 onClick={redo}
+                 disabled={historyIndex >= history.length - 1}
+                 className="p-3 bg-white border border-sleek-border rounded-xl shadow-sm text-sleek-text-main hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                 title="Rétablir (Redo)"
+               >
+                 <Redo2 size={18} />
+               </button>
+             </div>
+             <div className="flex flex-col items-end bg-white px-4 py-2 rounded-xl border border-sleek-border shadow-sm">
+                <span className="text-[10px] uppercase font-bold text-sleek-text-muted">Investissement Total (DA)</span>
+                <span className="text-lg font-extrabold text-sleek-primary">{formatCurrency(totalInvestment)} DA</span>
+             </div>
+             <button 
+               onClick={handleExportExcel}
+               className="px-5 py-3 text-xs font-black bg-emerald-600 text-white rounded-xl shadow-lg shadow-emerald-600/20 hover:bg-emerald-500 hover:-translate-y-0.5 transition-all active:scale-95 flex items-center gap-3 uppercase tracking-widest"
+             >
+               <FileSpreadsheet size={16}/> Exporter vers Excel
+             </button>
+          </div>
+        </header>
+
+        {/* Stats Grid - Minimal Summary */}
+        <div className="px-8 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6 shrink-0">
+          <CompactStatCard 
+            label="Tonnage Total" 
+            value={`${formatCurrency(totalRow.extractionGranite + totalRow.extractionTuf)} T`} 
+            formula="Somme totale des quantités extraites (Granite + Tuf) sur la période du projet."
+          />
+          <CompactStatCard 
+            label="CA Global (10 ans)" 
+            value={`${formatCurrency(totalRow.caGlobal / 1000000)} M DA`} 
+            formula="Chiffre d'Affaires Global : Somme de tous les revenus générés par la vente des matériaux."
+          />
+          <CompactStatCard label="Cash-Flow (FNT)" value={`${formatCurrency(totalRow.fnt / 1000000)} M DA`} formula="Formule : Résultat Net + Dotations aux Amortissements" />
+          <CompactStatCard label="Revient Granite" value={formatCompact(totalRow.prixRevientGranite)} formula="(Direct G. + Communs) / Tonnage" />
+          <CompactStatCard label="Revient Tuf" value={formatCompact(totalRow.prixRevientTuf)} formula="(Direct T. + Communs) / Tonnage" />
+        </div>
+
+        {/* Views */}
+        <div className="flex-1 px-8 pb-8 overflow-hidden flex flex-col min-h-0">
+          <AnimatePresence mode="wait">
+            {activeTab === 'dashboard' && (
+              <motion.div 
+                key="dashboard"
+                initial={{ opacity: 0, y: 15 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                exit={{ opacity: 0, scale: 0.98 }} 
+                transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                className="flex-1 overflow-y-auto pr-2 custom-scrollbar"
+              >
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-8">
+                  <DashboardKPI icon={<Wallet className="text-sleek-primary" />} label="Investissement Initial" value={formatCurrency(totalInvestment)} suffix="DA" />
+                  <DashboardKPI icon={<TrendingUp className="text-sleek-accent-green" />} label="CA GLOBAL (10 ans)" value={formatCurrency(totalRow.caGlobal)} suffix="DA" />
+                  <DashboardKPI 
+                    icon={<Activity className="text-indigo-600" />} 
+                    label="FNT Cumulé (10 ans)" 
+                    value={formatCurrency(totalRow.fnt)} 
+                    suffix="DA" 
+                    formula="Résultat Net + Dotations aux Amortissements"
+                  />
+                  <DashboardKPI 
+                    icon={<TrendingDown className="text-orange-500" />} 
+                    label="Coût Revient Granite" 
+                    value={formatCompact(totalRow.prixRevientGranite)} 
+                    suffix="DA/T" 
+                    formula="(Direct(G) + Quote-part Communs) / Tonnage(G)"
+                  />
+                  <DashboardKPI 
+                    icon={<TrendingDown className="text-amber-500" />} 
+                    label="Coût Revient Tuf" 
+                    value={formatCompact(totalRow.prixRevientTuf)} 
+                    suffix="DA/T" 
+                    formula="(Direct(T) + Quote-part Communs) / Tonnage(T)"
+                  />
+                  <DashboardKPI icon={<Check className="text-emerald-500" />} label="Payback (Estimé)" value={paybackYear === 'N/A' ? 'N/A' : `Année ${paybackYear}`} />
+                </div>
+
+                <div className="grid grid-cols-3 gap-6">
+                  <div className="col-span-2 bg-white rounded-2xl border border-sleek-border shadow-sm p-8">
+                    <h3 className="text-sm font-bold mb-6 flex items-center gap-2 text-sleek-text-main">
+                      <BarChartIcon size={18} className="text-sleek-primary"/> Rentabilité Annuelle sur 10 ans
+                    </h3>
+                    <div className="h-[350px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={chartData}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 600, fill: '#64748b'}} />
+                          <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 600, fill: '#64748b'}} tickFormatter={v => `${v/1000000}M`} />
+                          <Tooltip 
+                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', fontSize: '11px' }}
+                            formatter={(v: number) => [formatCurrency(v) + " DA", ""]}
+                          />
+                          <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 'bold', paddingTop: '20px' }} />
+                          <Bar dataKey="Chiffre d'affaires" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="Résultat Net" fill="#10b981" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-2xl border border-sleek-border shadow-sm p-8">
+                    <h3 className="text-sm font-bold mb-6 flex items-center gap-2 text-sleek-text-main">
+                      <PieChart size={18} className="text-sleek-accent-red"/> Structure des Coûts Cumulés
+                    </h3>
+                    <div className="h-[280px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <RechartsPieChart>
+                          <Pie
+                            data={costStructureData}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={60}
+                            outerRadius={80}
+                            paddingAngle={5}
+                            dataKey="value"
+                            label={({name, percent}) => `${name} ${(percent * 100).toFixed(0)}%`}
+                            labelLine={false}
+                          >
+                            {costStructureData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip 
+                             contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', fontSize: '11px' }}
+                             formatter={(v: number) => [formatCurrency(v) + " DA", ""]}
+                          />
+                        </RechartsPieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="space-y-2 mt-6">
+                       {costStructureData.map((s, i) => (
+                         <div key={i} className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                               <div className="w-2 h-2 rounded-full" style={{backgroundColor: s.color}}></div>
+                               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{s.name}</span>
+                            </div>
+                            <span className="text-xs font-mono font-bold text-slate-800">{((s.value / costStructureData.reduce((a,b)=>a+b.value, 0)) * 100).toFixed(1)}%</span>
+                         </div>
+                       ))}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'invest' && (
+              <motion.div 
+                key="invest" 
+                initial={{ opacity: 0, y: 15 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                exit={{ opacity: 0, scale: 0.98 }} 
+                transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                className="h-full flex flex-col gap-6"
+              >
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 shrink-0">
+                  <div className="lg:col-span-4 bg-white p-6 rounded-2xl border border-sleek-border shadow-md">
+                    <h3 className="text-sm font-bold mb-4 flex items-center gap-2 text-sleek-text-main"><PlusCircle size={16} className="text-sleek-primary"/> Nouvel Équipement</h3>
+                    <div className="space-y-4">
+                      <InputGroupVertical label="Désignation" value={newEqName} onChange={setNewEqName} />
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-70 px-1">Catégorie</label>
+                        <select 
+                          value={newEqCategory} 
+                          onChange={(e) => setNewEqCategory(e.target.value as InvestmentCategory)}
+                          className="w-full bg-slate-50 border border-sleek-border rounded-xl px-4 py-3 text-sm font-semibold focus:ring-2 focus:ring-sleek-primary/10 focus:bg-white focus:border-sleek-primary transition-all outline-none shadow-inner cursor-pointer"
+                        >
+                          <option value="Frais préliminaires & Exploration">Frais préliminaires & Exploration</option>
+                          <option value="Infrastructures & Bâtiments">Infrastructures & Bâtiments</option>
+                          <option value="Équipements Lourds & Matériel">Équipements Lourds & Matériel</option>
+                        </select>
+                      </div>
+                      <InputGroupVertical label="Prix d'Acquisition (DA)" value={newEqPrice} onChange={setNewEqPrice} type="number" />
+                      <InputGroupVertical label="Durée (ans)" value={newEqDuration} onChange={setNewEqDuration} type="number" helper="Laissez 0 si non amortissable (Frais préliminaires)" />
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-70 px-1">Affectation Analytique</label>
+                        <select 
+                          value={newEqAlloc} 
+                          onChange={(e) => setNewEqAlloc(e.target.value as any)}
+                          className="w-full bg-sleek-bg/50 border border-sleek-border rounded-xl px-4 py-3 text-sm font-semibold focus:ring-2 focus:ring-sleek-primary/10 focus:bg-white focus:border-sleek-primary transition-all outline-none"
+                        >
+                          <option value="Granite">Directe Granite</option>
+                          <option value="Tuf">Directe Tuf</option>
+                          <option value="Common">Commune / Partagée</option>
+                        </select>
+                      </div>
+                      <button onClick={addEquipment} className="w-full py-3 bg-sleek-primary text-white rounded-xl font-bold text-sm tracking-wide mt-2 shadow-lg shadow-sleek-primary/10">Ajouter au Projet</button>
+                    </div>
+                  </div>
+
+                  <div className="lg:col-span-8 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col max-h-[440px]">
+                    <div className="px-6 py-4 border-b border-sleek-border bg-slate-50 flex justify-between items-center">
+                      <h3 className="text-xs font-bold text-sleek-text-muted uppercase tracking-widest">Récapitulatif des Investissements</h3>
+                      <span className="bg-sleek-primary/10 text-sleek-primary px-3 py-1 rounded-full text-[10px] font-bold">Total: {formatCurrency(totalInvestment)}</span>
+                    </div>
+                    <div className="overflow-y-auto flex-1 custom-scrollbar">
+                      <table className="w-full text-left text-[12px]">
+                        <thead className="sticky top-0 bg-white border-b border-sleek-border z-10 shadow-sm">
+                          <tr className="text-[10px] font-bold text-sleek-text-muted uppercase tracking-wider">
+                            <th className="p-4">Désignation</th>
+                            <th className="p-4 text-right">Coût</th>
+                            <th className="p-4 text-center">Durée</th>
+                            <th className="p-4 text-right">Amort/an</th>
+                            <th className="p-4 text-center">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {(["Frais préliminaires & Exploration", "Infrastructures & Bâtiments", "Équipements Lourds & Matériel"] as InvestmentCategory[]).map(cat => {
+                            const items = equipments.filter(e => e.category === cat);
+                            const catSubtotal = items.reduce((sum, e) => sum + e.price, 0);
+                            if (items.length === 0) return null;
+                            return (
+                              <React.Fragment key={cat}>
+                                <tr className="bg-slate-100/50">
+                                  <td colSpan={5} className="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-sleek-primary border-y border-slate-200">{cat}</td>
+                                </tr>
+                                {items.map(eq => (
+                                  <tr key={eq.id} className="hover:bg-slate-50/50 transition-colors group">
+                                    <td className="p-4 font-semibold text-sleek-text-main pl-8 italic">{eq.designation}</td>
+                                    <td className="p-4 text-right font-mono font-bold text-sleek-text-main">{formatCurrency(eq.price)}</td>
+                                    <td className="p-4 text-center text-sleek-text-muted">{eq.duration || '-'}</td>
+                                    <td className="p-4 text-right font-mono font-bold text-sleek-accent-red">
+                                      {eq.duration > 0 ? formatCurrency(eq.price / eq.duration) : '-'}
+                                    </td>
+                                    <td className="p-4 text-center">
+                                      <button onClick={() => removeEquipment(eq.id)} className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"><Trash size={14}/></button>
+                                    </td>
+                                  </tr>
+                                ))}
+                                <tr className="bg-slate-50 font-bold border-b border-slate-200">
+                                  <td className="p-3 pl-8 text-[10px] uppercase opacity-60">Sous-total {cat}</td>
+                                  <td className="p-3 text-right font-mono text-sleek-primary">{formatCurrency(catSubtotal)}</td>
+                                  <td colSpan={3}></td>
+                                </tr>
+                              </React.Fragment>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot className="sticky bottom-0 bg-sleek-primary text-white font-bold border-t border-sleek-border shadow-[0_-2px_8px_rgba(0,0,0,0.1)]">
+                          <tr>
+                            <td className="p-4 text-sm font-extrabold uppercase tracking-widest text-white">TOTAL GÉNÉRAL DE L'INVESTISSEMENT</td>
+                            <td className="p-4 text-right text-sm font-extrabold bg-blue-700">{formatCurrency(totalInvestment)}</td>
+                            <td></td><td></td><td></td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex-1 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col">
+                   <div className="px-6 py-4 border-b border-sleek-border flex items-center justify-between bg-slate-50">
+                      <h3 className="text-xs font-bold uppercase tracking-widest text-sleek-text-muted flex items-center gap-2">
+                        <TrendingDown size={14} className="text-sleek-accent-red"/> Tableau 02. Amortissements Annuels
+                      </h3>
+                      <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-sleek-accent-red"></div> <span className="text-[10px] font-bold text-sleek-text-muted">Annuité Active</span></div>
+                        <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-gray-200"></div> <span className="text-[10px] font-bold text-sleek-text-muted">Éteint</span></div>
+                      </div>
+                   </div>
+                   <div className="overflow-auto flex-1">
+                      <table className="w-full text-[11px] border-collapse min-w-[1100px]">
+                        <thead>
+                          <tr className="bg-white border-b border-sleek-border">
+                            <th className="p-4 text-left w-56 sticky left-0 bg-white z-10 border-r border-slate-100 font-bold text-sleek-text-muted uppercase tracking-widest text-[9px]">Équipement</th>
+                            {Array.from({length: 10}).map((_, i) => (
+                              <th key={i} className="p-4 text-right font-bold text-sleek-text-muted uppercase tracking-widest text-[9px]">Année {i+1}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {amortResults.rows.map((row, i) => (
+                            <tr key={i} className="hover:bg-slate-50/50 transition-colors font-mono">
+                              <td className="p-4 text-left sticky left-0 bg-white z-10 border-r border-slate-100 font-sans font-semibold text-sleek-text-muted text-[11px] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.05)]">{row.designation}</td>
+                              {row.years.map((val, idx) => (
+                                <td key={idx} className={cn("p-4 text-right tabular-nums", val > 0 ? "text-sleek-accent-red font-bold" : "text-gray-200")}>
+                                  {val > 0 ? formatCurrency(val) : '—'}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot className="sticky bottom-0 bg-red-50/50 border-t border-red-100">
+                          <tr className="font-sans font-bold text-sleek-accent-red">
+                            <td className="p-5 text-left sticky left-0 bg-red-50 z-10 border-r border-red-200 uppercase tracking-widest text-[10px]">Dotation Totale TCR</td>
+                            {Array.from({length: 10}).map((_, i) => (
+                              <td key={i} className="p-5 text-right text-sm tabular-nums font-extrabold">
+                                {formatCurrency(amortResults.annualTotals.granite[i] + amortResults.annualTotals.tuf[i] + amortResults.annualTotals.common[i])}
+                              </td>
+                            ))}
+                          </tr>
+                        </tfoot>
+                      </table>
+                   </div>
+                   <div className="px-6 py-3 bg-blue-50/30 border-t border-blue-50 flex items-center gap-2">
+                       <span className="text-[11px] text-blue-600 italic font-medium">💡 Ce montant est injecté automatiquement dans la ligne DOT. AMORTISS du TCR.</span>
+                    </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'hr' && (
+              <motion.div 
+                key="hr" 
+                initial={{ opacity: 0, y: 15 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                exit={{ opacity: 0, scale: 0.98 }} 
+                transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                className="h-full flex flex-col gap-6"
+              >
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 shrink-0">
+                  <div className="lg:col-span-4 bg-white p-6 rounded-2xl border border-sleek-border shadow-md">
+                    <h3 className="text-sm font-bold mb-4 flex items-center gap-2 text-sleek-text-main"><UsersRound size={16} className="text-sleek-primary"/> Nouveau Poste</h3>
+                    <div className="space-y-4">
+                      <InputGroupVertical label="Désignation du Poste" value={newRoleName} onChange={setNewRoleName} />
+                      <div className="grid grid-cols-2 gap-4">
+                        <InputGroupVertical label="Effectif" value={newRoleCount} onChange={setNewRoleCount} type="number" />
+                        <InputGroupVertical label="Sal. Net" value={newRoleSalary} onChange={setNewRoleSalary} type="number" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-70 px-1">Affectation</label>
+                        <select 
+                          value={newRoleAlloc} 
+                          onChange={(e) => setNewRoleAlloc(e.target.value as any)}
+                          className="w-full bg-sleek-bg/50 border border-sleek-border rounded-xl px-4 py-3 text-sm font-semibold focus:ring-2 focus:ring-sleek-primary/10 focus:bg-white focus:border-sleek-primary transition-all outline-none"
+                        >
+                          <option value="Granite">Spécifique Granite</option>
+                          <option value="Tuf">Spécifique Tuf</option>
+                          <option value="Common">Commun (Admin/Garde)</option>
+                        </select>
+                      </div>
+                      <div className="pt-4 border-t border-slate-100 space-y-4">
+                        <h4 className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-60">Paramètres de Masse Salariale</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                           <InputGroupVertical label="Charges Soc. (%)" value={(hrConfig.socialChargesRate * 100).toString()} onChange={v => setHrConfig({...hrConfig, socialChargesRate: Number(v)/100})} type="number" />
+                           <InputGroupVertical label="Inflation (%)" value={(hrConfig.annualIncreaseRate * 100).toString()} onChange={v => setHrConfig({...hrConfig, annualIncreaseRate: Number(v)/100})} type="number" />
+                        </div>
+                      </div>
+                      <button onClick={addRole} className="w-full py-3 bg-sleek-primary text-white rounded-xl font-bold text-sm tracking-wide mt-2 shadow-lg shadow-sleek-primary/10">Ajouter l'Effectif</button>
+                    </div>
+                  </div>
+
+                  <div className="lg:col-span-8 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col max-h-[400px]">
+                    <div className="px-6 py-4 border-b border-sleek-border bg-slate-50 flex justify-between items-center">
+                      <h3 className="text-xs font-bold text-sleek-text-muted uppercase tracking-widest">Tableau RH. Liste du Personnel</h3>
+                      <span className="bg-sleek-primary/10 text-sleek-primary px-3 py-1 rounded-full text-[10px] font-bold">{roles.length} Catégories</span>
+                    </div>
+                    <div className="overflow-y-auto flex-1 custom-scrollbar">
+                      <table className="w-full text-left text-[12px]">
+                        <thead className="sticky top-0 bg-white border-b border-sleek-border z-10 shadow-sm">
+                          <tr className="text-[10px] font-bold text-sleek-text-muted uppercase tracking-wider">
+                            <th className="p-4">Désignation</th>
+                            <th className="p-4 text-center">Effectif</th>
+                            <th className="p-4 text-right">Sal. Mensuel (DA)</th>
+                            <th className="p-4 text-right">Coût Annuel (DA)</th>
+                            <th className="p-4 text-center">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {roles.map(role => {
+                            const annual = role.count * role.monthlySalary * 12 * (1 + hrConfig.socialChargesRate);
+                            return (
+                              <tr key={role.id} className="hover:bg-slate-50/50 transition-colors">
+                                <td className="p-4 font-semibold text-sleek-text-main">{role.designation}</td>
+                                <td className="p-4 text-center">{role.count}</td>
+                                <td className="p-4 text-right font-mono">{formatCurrency(role.monthlySalary)}</td>
+                                <td className="p-4 text-right font-mono font-bold text-sleek-primary">{formatCurrency(annual)}</td>
+                                <td className="p-4 text-center">
+                                  <button onClick={() => removeRole(role.id)} className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"><Trash size={14}/></button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {roles.length === 0 && (
+                            <tr><td colSpan={5} className="p-10 text-center text-slate-300 italic">Aucun personnel enregistré.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex-1 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col">
+                   <div className="px-6 py-4 border-b border-sleek-border bg-slate-50 flex items-center justify-between">
+                      <h3 className="text-xs font-bold uppercase tracking-widest text-sleek-text-muted">Projection de la Masse Salariale sur 10 ans</h3>
+                      <div className="text-[10px] font-bold text-sleek-primary bg-blue-50 px-3 py-1 rounded-full uppercase tracking-widest">Injection Directe TCR</div>
+                   </div>
+                   <div className="overflow-auto flex-1 p-6">
+                      <div className="grid grid-cols-10 gap-3">
+                         {Array.from({length: 10}).map((_, i) => (
+                           <div key={i} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100 items-center justify-center">
+                              <span className="text-[9px] font-bold text-slate-400">Année {i+1}</span>
+                              <span className="text-[11px] font-mono font-bold text-sleek-primary truncate w-full text-center">{formatCurrency(hrTotals.granite[i] + hrTotals.tuf[i] + hrTotals.common[i])}</span>
+                           </div>
+                         ))}
+                      </div>
+                      <div className="mt-6 pt-4 border-t border-slate-100 flex items-center gap-2 text-blue-600 italic font-medium">
+                        <span className="text-[11px]">💡 Ce montant est injecté automatiquement dans la ligne PERSONNEL du TCR.</span>
+                      </div>
+                   </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'ops' && (
+              <motion.div 
+                key="ops" 
+                initial={{ opacity: 0, y: 15 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                exit={{ opacity: 0, scale: 0.98 }} 
+                transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                className="h-full flex flex-col gap-6"
+              >
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 shrink-0">
+                  <div className="lg:col-span-4 bg-white p-6 rounded-2xl border border-sleek-border shadow-md">
+                    <h3 className="text-sm font-bold mb-4 flex items-center gap-2 text-sleek-text-main"><Settings size={16} className="text-sleek-primary"/> Paramètres d'Exploitation</h3>
+                    <div className="space-y-4">
+                      <InputGroupVertical label="Prix du Litre (DA)" value={opConfig.fuelPrice.toString()} onChange={v => setOpConfig({...opConfig, fuelPrice: Number(v)})} type="number" />
+                      <div className="grid grid-cols-2 gap-4">
+                        <InputGroupVertical label="Jours/An" value={opConfig.workDaysPerYear.toString()} onChange={v => setOpConfig({...opConfig, workDaysPerYear: Number(v)})} type="number" />
+                        <InputGroupVertical label="Inflation (%)" value={opConfig.annualInflationRate.toString()} onChange={v => setOpConfig({...opConfig, annualInflationRate: Number(v)})} type="number" />
+                      </div>
+                      <div className="pt-4 border-t border-slate-100">
+                        <h4 className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-60 mb-4">Ajouter un Engin / Machine</h4>
+                        <div className="space-y-4">
+                           <InputGroupVertical label="Désignation de l'Engin" value={newOpName} onChange={setNewOpName} />
+                           <div className="grid grid-cols-2 gap-4">
+                              <InputGroupVertical label="Conso (L/H)" value={newOpCons} onChange={setNewOpCons} type="number" />
+                              <InputGroupVertical label="Heures/Jour" value={newOpHours} onChange={setNewOpHours} type="number" />
+                           </div>
+                           <div className="grid grid-cols-2 gap-4">
+                              <InputGroupVertical label="Valeur Engin (DA)" value={newOpValue} onChange={setNewOpValue} type="number" />
+                              <div className="space-y-1.5">
+                                <label className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-70 px-1">Maint. (%)</label>
+                                <select value={newOpMaint} onChange={(e) => setNewOpMaint(e.target.value)} className="w-full bg-slate-50 border border-sleek-border rounded-xl px-4 py-2.5 text-sm font-semibold">
+                                  <option value="2">2%</option>
+                                  <option value="5">5%</option>
+                                  <option value="10">10%</option>
+                                </select>
+                              </div>
+                           </div>
+                           <div className="space-y-1.5">
+                              <label className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-70 px-1">Affectation</label>
+                              <select 
+                                value={newOpAlloc} 
+                                onChange={(e) => setNewOpAlloc(e.target.value as any)}
+                                className="w-full bg-sleek-bg/50 border border-sleek-border rounded-xl px-4 py-3 text-sm font-semibold focus:ring-2 focus:ring-sleek-primary/10 focus:bg-white focus:border-sleek-primary transition-all outline-none"
+                              >
+                                <option value="Granite">Uniquement Granite</option>
+                                <option value="Tuf">Uniquement Tuf</option>
+                                <option value="Common">Utilisation Commune</option>
+                              </select>
+                           </div>
+                        </div>
+                      </div>
+                      <button onClick={addMachine} className="w-full py-3 bg-sleek-primary text-white rounded-xl font-bold text-sm tracking-wide mt-2 shadow-lg shadow-sleek-primary/10 transition-all hover:scale-[1.02] active:scale-[0.98]">
+                        Enregistrer l'Engin
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="lg:col-span-8 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col max-h-[480px]">
+                    <div className="px-6 py-4 border-b border-sleek-border bg-slate-50 flex justify-between items-center">
+                      <h3 className="text-xs font-bold text-sleek-text-muted uppercase tracking-widest flex items-center gap-2"><Wrench size={14}/> Parc d'Équipement Actif</h3>
+                      <span className="bg-sleek-primary/10 text-sleek-primary px-3 py-1 rounded-full text-[10px] font-bold">{machines.length} Machines</span>
+                    </div>
+                    <div className="overflow-y-auto flex-1 custom-scrollbar">
+                      <table className="w-full text-left text-[12px]">
+                        <thead className="sticky top-0 bg-white border-b border-sleek-border z-10 shadow-sm">
+                          <tr className="text-[10px] font-bold text-sleek-text-muted uppercase tracking-wider">
+                            <th className="p-4">Machine</th>
+                            <th className="p-4 text-center">Conso/H</th>
+                            <th className="p-4 text-center">Val (DA)</th>
+                            <th className="p-4 text-right">Carburant/An</th>
+                            <th className="p-4 text-right">Maintenance/An</th>
+                            <th className="p-4 text-center">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {machines.map(m => {
+                            const fuelAn = m.hourlyConsumption * m.hoursPerDay * opConfig.workDaysPerYear * opConfig.fuelPrice;
+                            const maintAn = m.assetValue * (m.maintenanceRate / 100);
+                            return (
+                              <tr key={m.id} className="hover:bg-slate-50/50 transition-colors">
+                                <td className="p-4 font-semibold text-sleek-text-main">{m.designation}</td>
+                                <td className="p-4 text-center">{m.hourlyConsumption}L @ {m.hoursPerDay}h</td>
+                                <td className="p-4 text-center text-slate-400">{formatCurrency(m.assetValue)}</td>
+                                <td className="p-4 text-right font-mono font-bold text-sleek-primary">{formatCurrency(fuelAn)}</td>
+                                <td className="p-4 text-right font-mono font-bold text-sleek-accent-green">{formatCurrency(maintAn)}</td>
+                                <td className="p-4 text-center">
+                                  <button onClick={() => removeMachine(m.id)} className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"><Trash size={14}/></button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {machines.length === 0 && (
+                            <tr><td colSpan={6} className="p-10 text-center text-slate-300 italic">Aucun engin d'exploitation enregistré.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex-1 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col">
+                   <div className="px-6 py-4 border-b border-sleek-border bg-slate-50 flex items-center justify-between">
+                      <h3 className="text-xs font-bold uppercase tracking-widest text-sleek-text-muted">Impact Global sur le TCR (Injection de Matières & Services)</h3>
+                      <div className="bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest">Inflation de {opConfig.annualInflationRate}% appliquée de l'An 2 à 10</div>
+                   </div>
+                   <div className="overflow-auto flex-1 p-6 flex flex-col">
+                      <div className="grid grid-cols-10 gap-3 min-w-[900px]">
+                         {calculatedYears.map((y, i) => (
+                           <div key={i} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                              <span className="text-[9px] font-bold text-slate-400 text-center">Année {i+1}</span>
+                              <div className="border-t border-slate-200 pt-2 space-y-2">
+                                <div className="flex flex-col">
+                                   <span className="text-[8px] uppercase font-bold text-sleek-primary opacity-60">Fuel</span>
+                                   <span className="text-[10px] font-mono font-bold">{formatCurrency(opResults.fuel[i])}</span>
+                                </div>
+                                <div className="flex flex-col">
+                                   <span className="text-[8px] uppercase font-bold text-sleek-accent-green opacity-60">Maint.</span>
+                                   <span className="text-[10px] font-mono font-bold">{formatCurrency(opResults.maintenance[i])}</span>
+                                </div>
+                              </div>
+                           </div>
+                         ))}
+                      </div>
+                      <div className="mt-8 space-y-2 border-t border-slate-100 pt-4 text-blue-600 italic font-medium">
+                         <p className="text-[11px] flex items-center gap-2">💡 Ce montant (Fuel) est injecté automatiquement dans la ligne MATIÈRES du TCR.</p>
+                         <p className="text-[11px] flex items-center gap-2">💡 Ce montant (Maintenance) est injecté automatiquement dans la ligne SERVICES du TCR.</p>
+                      </div>
+                   </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'edit' && (
+              <motion.div 
+                key="edit" 
+                initial={{ opacity: 0, y: 15 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                exit={{ opacity: 0, scale: 0.98 }} 
+                transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                className="flex-1 overflow-y-auto pr-2 space-y-4 custom-scrollbar"
+              >
+                {/* Global Calculation SettingsSection */}
+                <div className="bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden mb-6 transition-all duration-300">
+                  <div 
+                    onClick={() => setIsSettingsExpanded(!isSettingsExpanded)}
+                    className="w-full px-8 py-5 flex items-center justify-between hover:bg-slate-50 transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-600">
+                        <Settings size={20} className={cn("transition-transform duration-500", isSettingsExpanded && "rotate-90")} />
+                      </div>
+                      <div className="text-left">
+                        <h3 className="font-bold text-sm text-sleek-text-main">Paramètres Globaux des Calculs</h3>
+                        <p className="text-[10px] text-sleek-text-muted font-bold uppercase tracking-widest mt-0.5">Inflation, Charges Sociales, Fiscalité</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          saveManualSnapshot();
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 bg-sleek-primary text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-sleek-primary/90 transition-all shadow-lg shadow-sleek-primary/20"
+                      >
+                        <Copy size={14} /> Sauvegarder Simulation
+                      </button>
+                      <div className={cn("transition-transform duration-300", isSettingsExpanded ? "rotate-180" : "")}>
+                        <PlusCircle size={20} className="text-slate-300" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <AnimatePresence>
+                    {isSettingsExpanded && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.3, ease: "easeInOut" }}
+                        className="overflow-hidden border-t border-slate-100 bg-slate-50/30"
+                      >
+                        <div className="p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+                          <div className="space-y-4">
+                            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-200 pb-2">Fiscalité</h4>
+                            <InputGroupVertical 
+                              label="Taux IBM (%)" 
+                              value={(ibmRate * 100).toString()} 
+                              onChange={(v) => setIbmRate(Number(v) / 100)} 
+                              onBlur={() => pushToHistory(years)}
+                              type="number"
+                              helper="Impôt sur les Bénéfices des Travaux Miniers"
+                            />
+                          </div>
+                          <div className="space-y-4">
+                            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-200 pb-2">Personnel</h4>
+                            <div className="space-y-4">
+                              <InputGroupVertical 
+                                label="Charges Sociales (%)" 
+                                value={(hrConfig.socialChargesRate * 100).toString()} 
+                                onChange={(v) => setHrConfig({...hrConfig, socialChargesRate: Number(v)/100})} 
+                                onBlur={() => pushToHistory(years)}
+                                type="number"
+                              />
+                              <InputGroupVertical 
+                                label="Augmentation Annuelle (%)" 
+                                value={(hrConfig.annualIncreaseRate * 100).toString()} 
+                                onChange={(v) => setHrConfig({...hrConfig, annualIncreaseRate: Number(v)/100})} 
+                                onBlur={() => pushToHistory(years)}
+                                type="number"
+                              />
+                            </div>
+                          </div>
+                          <div className="space-y-4">
+                            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-200 pb-2">Exploitation</h4>
+                            <div className="space-y-4">
+                              <InputGroupVertical 
+                                label="Inflation Fuel/Maint (%)" 
+                                value={opConfig.annualInflationRate.toString()} 
+                                onChange={(v) => setOpConfig({...opConfig, annualInflationRate: Number(v)})} 
+                                onBlur={() => pushToHistory(years)}
+                                type="number"
+                              />
+                              <InputGroupVertical 
+                                label="Prix du Litre (DA)" 
+                                value={opConfig.fuelPrice.toString()} 
+                                onChange={(v) => setOpConfig({...opConfig, fuelPrice: Number(v)})} 
+                                onBlur={() => pushToHistory(years)}
+                                type="number"
+                              />
+                            </div>
+                          </div>
+                          <div className="space-y-4">
+                            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-200 pb-2">Calendrier</h4>
+                            <InputGroupVertical 
+                              label="Jours Ouvrable / An" 
+                              value={opConfig.workDaysPerYear.toString()} 
+                              onChange={(v) => setOpConfig({...opConfig, workDaysPerYear: Number(v)})} 
+                              onBlur={() => pushToHistory(years)}
+                              type="number"
+                            />
+                          </div>
+                        </div>
+                        <div className="px-8 py-4 bg-indigo-50/50 border-t border-slate-100 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></div>
+                            <p className="text-[10px] font-bold text-indigo-900/60 uppercase tracking-wider">
+                              Ces paramètres s'appliquent en temps réel sur l'ensemble des projections sur 10 ans.
+                            </p>
+                          </div>
+                          <button 
+                            onClick={() => {
+                              if (window.confirm("Voulez-vous vraiment réinitialiser toutes les données ? Cette action est irréversible.")) {
+                                localStorage.clear();
+                                window.location.reload();
+                              }
+                            }}
+                            className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-bold text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors uppercase tracking-widest"
+                          >
+                            <Trash2 size={12} /> Réinitialiser
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                <div className="bg-indigo-50 border border-indigo-100 p-5 rounded-2xl flex gap-4 text-indigo-900 mb-2 shadow-sm">
+                   <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shrink-0"><Check size={20}/></div>
+                   <div>
+                     <h4 className="font-bold text-sm">Synchronisation Totale Active</h4>
+                     <p className="text-xs opacity-70 leading-relaxed mt-1">
+                       Les dotations aux amortissements et les frais de personnel sont automatiquement synchronisés. 
+                       Les modifications dans les modules <span className="underline cursor-pointer font-bold hover:text-indigo-600" onClick={() => setActiveTab('invest')}>Investissements</span> et <span className="underline cursor-pointer font-bold hover:text-indigo-600" onClick={() => setActiveTab('hr')}>RH</span> impactent immédiatement votre TCR.
+                     </p>
+                   </div>
+                </div>
+                {years.map((year, idx) => (
+                  <div key={year.year} className="bg-white rounded-2xl border border-sleek-border shadow-sm p-8 hover:shadow-md transition-shadow">
+                    <div className="flex items-center justify-between mb-8">
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 bg-sleek-bg rounded-xl flex items-center justify-center font-extrabold text-sm text-sleek-text-muted border border-sleek-border">{year.year}</div>
+                        <div>
+                          <h3 className="font-bold text-sleek-text-main text-lg tracking-tight">Exercice Annuel {year.year}</h3>
+                          <span className="text-[10px] uppercase font-bold tracking-widest text-sleek-text-muted opacity-60">Prévisions Financières</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 bg-red-50/50 px-5 py-3 rounded-xl border border-red-100">
+                        <TrendingDown size={18} className="text-sleek-accent-red"/>
+                        <div className="flex flex-col">
+                           <span className="text-[10px] font-bold text-red-400 uppercase leading-none">Dotation Amortiss. </span>
+                           <span className="text-lg font-mono font-bold text-sleek-accent-red leading-none mt-1">{formatCurrency(amortResults.annualTotals.granite[idx] + amortResults.annualTotals.tuf[idx] + amortResults.annualTotals.common[idx])} DA</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-4 gap-6 mb-8 pt-6 border-t border-slate-100">
+                      <div className="flex flex-col gap-2">
+                        <span className="text-[10px] font-extrabold text-sleek-text-muted uppercase tracking-widest pl-1">Section Granite</span>
+                        <InputGroup label="Extraction (T)" value={year.extractionGranite} onChange={(v) => handleUpdateYear(idx, 'extractionGranite', v)} onBlur={() => pushToHistory(years)} suffix="T" />
+                        <InputGroup label="Revenus (DA)" value={year.caGranite} onChange={(v) => handleUpdateYear(idx, 'caGranite', v)} onBlur={() => pushToHistory(years)} suffix="DA" />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <span className="text-[10px] font-extrabold text-sleek-text-muted uppercase tracking-widest pl-1">Section Tuf</span>
+                        <InputGroup label="Extraction (T)" value={year.extractionTuf} onChange={(v) => handleUpdateYear(idx, 'extractionTuf', v)} onBlur={() => pushToHistory(years)} suffix="T" />
+                        <InputGroup label="Revenus (DA)" value={year.caTuf} onChange={(v) => handleUpdateYear(idx, 'caTuf', v)} onBlur={() => pushToHistory(years)} suffix="DA" />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <span className="text-[10px] font-extrabold text-sleek-text-muted uppercase tracking-widest pl-1">Charges Directes</span>
+                        <InputGroup label="Matières (AUTO)" value={year.matieresFournitures} onChange={(v) => handleUpdateYear(idx, 'matieresFournitures', v)} onBlur={() => pushToHistory(years)} isAuto={true} />
+                        <InputGroup label="Services (AUTO)" value={year.services} onChange={(v) => handleUpdateYear(idx, 'services', v)} onBlur={() => pushToHistory(years)} isAuto={true} />
+                        <InputGroup label="Personnel (AUTO)" value={year.fraisPersonnel} onChange={(v) => handleUpdateYear(idx, 'fraisPersonnel', v)} onBlur={() => pushToHistory(years)} suffix="DA" isAuto={true} />
+                        <InputGroup label="Dot. Amortiss (AUTO)" value={year.dotationsAmortissements} onChange={(v) => handleUpdateYear(idx, 'dotationsAmortissements', v)} onBlur={() => pushToHistory(years)} suffix="DA" isAuto={true} />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <span className="text-[10px] font-extrabold text-sleek-text-muted uppercase tracking-widest pl-1">Charges Induites</span>
+                        <InputGroup label="Impôts & Taxes" value={year.impotsTaxes} onChange={(v) => handleUpdateYear(idx, 'impotsTaxes', v)} onBlur={() => pushToHistory(years)} />
+                        <InputGroup label="Frais Financiers" value={year.fraisFinanciers} onChange={(v) => handleUpdateYear(idx, 'fraisFinanciers', v)} onBlur={() => pushToHistory(years)} />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </motion.div>
+            )}
+
+            {activeTab === 'table' && (
+              <motion.div 
+                key="table" 
+                initial={{ opacity: 0, y: 15 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                exit={{ opacity: 0, scale: 0.98 }} 
+                transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                className="flex-1 bg-white rounded-2xl border border-sleek-border shadow-2xl overflow-hidden flex flex-col"
+              >
+                <div className="flex-1 overflow-auto custom-scrollbar relative">
+                  <table className="w-full border-collapse min-w-[1200px]">
+                    <thead className="sticky top-0 z-[60] shadow-sm">
+                      <tr>
+                        <th className="bg-slate-50 p-5 text-left w-72 border-b border-sleek-border font-bold text-[10px] uppercase tracking-widest text-sleek-text-muted sticky left-0 z-[70] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] font-serif italic backdrop-blur-md">Compte de Résultat (TCR - DA)</th>
+                        {calculatedYears.map(y => (
+                          <th key={y.year} className="bg-slate-50 p-5 text-right border-b border-sleek-border border-r border-white/40 font-bold text-[10px] text-sleek-text-muted whitespace-nowrap backdrop-blur-md">Année {y.year}</th>
+                        ))}
+                        <th className="bg-slate-100 p-5 text-right border-b border-sleek-border font-bold text-[10px] text-sleek-text-main shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)] uppercase tracking-widest sticky right-0 z-[70] backdrop-blur-md">TOTAL (DA)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-[12px] font-mono leading-none divide-y divide-slate-100/50">
+                      <SleekRow label="EXTRACTION GRANITE (T)" values={calculatedYears.map(y => y.extractionGranite)} total={totalRow.extractionGranite} format={formatCurrency} />
+                      <SleekRow label="EXTRACTION TUF (T)" values={calculatedYears.map(y => y.extractionTuf)} total={totalRow.extractionTuf} format={formatCurrency} />
+                      <SleekRow label="CHIFFRE AFFAIRES GRANITE" values={calculatedYears.map(y => y.caGranite)} total={totalRow.caGranite} format={formatCurrency} />
+                      <SleekRow label="CHIFFRE AFFAIRES TUF" values={calculatedYears.map(y => y.caTuf)} total={totalRow.caTuf} format={formatCurrency} />
+                      <SleekRow label="CHIFFRE AFFAIRES GLOBAL" values={calculatedYears.map(y => y.caGlobal)} total={totalRow.caGlobal} format={formatCurrency} type="total" />
+                      <SleekRow label="Matières & Four. Cons." values={calculatedYears.map(y => y.matieresFournitures)} total={totalRow.matieresFournitures} format={formatCurrency} />
+                      <SleekRow label="Services" values={calculatedYears.map(y => y.services)} total={totalRow.services} format={formatCurrency} />
+                      <SleekRow label="S/total 01 (Consommations)" values={calculatedYears.map(y => y.subtotal1)} total={totalRow.subtotal1} format={formatCurrency} type="subtotal" formula="Formule : Matières + Services" />
+                      <SleekRow label="VALEUR AJOUTÉE" values={calculatedYears.map(y => y.valeurAjoutee)} total={totalRow.valeurAjoutee} format={formatCurrency} type="added-value" formula="Formule : Chiffre d'affaires - S/total 1" />
+                      <SleekRow label="Charges de Personnel" values={calculatedYears.map(y => y.fraisPersonnel)} total={totalRow.fraisPersonnel} format={formatCurrency} />
+                      <SleekRow label="Impôts, taxes & versem. assimilés" values={calculatedYears.map(y => y.impotsTaxes)} total={totalRow.impotsTaxes} format={formatCurrency} />
+                      <SleekRow label="Charges financières" values={calculatedYears.map(y => y.fraisFinanciers)} total={totalRow.fraisFinanciers} format={formatCurrency} />
+                      <SleekRow label="Dotations aux amortissements" values={calculatedYears.map(y => y.dotationsAmortissements)} total={totalRow.dotationsAmortissements} format={formatCurrency} />
+                      <SleekRow label="S/Total 02 (Charges Exploitat.)" values={calculatedYears.map(y => y.subtotal2)} total={totalRow.subtotal2} format={formatCurrency} type="subtotal" formula="Formule : Personnel + Impôts & Taxes + Frais financiers + Dot. Amortiss." />
+                      <SleekRow label="RÉSULTAT D'EXPLOITATION" values={calculatedYears.map(y => y.resultatExploitation)} total={totalRow.resultatExploitation} format={formatCurrency} type="added-value" formula="Formule : Valeurs ajoutées - S/Total 2" />
+                      <SleekRow label="Impôts sur les bénéfices (IBM)" values={calculatedYears.map(y => y.ibm)} total={totalRow.ibm} format={formatCurrency} formula={`Formule : Résultat d'exploitation × Taux IBM (${ibmRate * 100}%)`} />
+                      <SleekRow label="RÉSULTAT NET DE L'EXERCICE" values={calculatedYears.map(y => y.resultatNet)} total={totalRow.resultatNet} format={formatCurrency} type="total" formula="Formule : Résultat d'exploitation - IBM" />
+                      <SleekRow label="CAPACITÉ D'AUTOFINANCEMENT (FNT)" values={calculatedYears.map(y => y.fnt)} total={totalRow.fnt} format={formatCurrency} formula="Formule : Résultat Net + Dotations aux Amortissements" />
+                      <SleekRow label="PRIX REVIENT GRANITE (DA/T)" values={calculatedYears.map(y => y.prixRevientGranite)} total={totalRow.prixRevientGranite} format={formatCompact} formula="Alloc. directes + Quote-part indirects" />
+                      <SleekRow label="PRIX REVIENT TUF (DA/T)" values={calculatedYears.map(y => y.prixRevientTuf)} total={totalRow.prixRevientTuf} format={formatCompact} formula="Alloc. directes + Quote-part indirects" />
+                    </tbody>
+                  </table>
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'charts' && (
+               <motion.div 
+                key="charts" 
+                initial={{ opacity: 0, y: 15 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                exit={{ opacity: 0, scale: 0.98 }} 
+                transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                className="flex-1 overflow-y-auto pr-2 space-y-8"
+               >
+                  <div className="bg-white p-8 rounded-2xl border border-sleek-border shadow-sm">
+                    <h3 className="text-sm font-bold mb-6 flex items-center gap-2"><BarChartIcon size={18} className="text-sleek-primary"/> Évolution du Chiffre d'affaires vs Résultat Net</h3>
+                    <div className="w-full h-[350px] min-h-[350px]">
+                       <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={chartData}>
+                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                             <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 600, fill: '#64748b'}} />
+                             <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 600, fill: '#64748b'}} tickFormatter={v => `${v/1000}k`} />
+                             <Tooltip 
+                                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', fontSize: '12px' }}
+                                formatter={(v: number) => [formatCurrency(v) + " DA", ""]}
+                             />
+                             <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', paddingTop: '20px' }} />
+                             <Bar dataKey="Chiffre d'affaires" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                             <Bar dataKey="Résultat Net" fill="#10b981" radius={[4, 4, 0, 0]} />
+                          </BarChart>
+                       </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-8 rounded-2xl border border-sleek-border shadow-sm">
+                    <h3 className="text-sm font-bold mb-6 flex items-center gap-2"><LineChartIcon size={18} className="text-sleek-accent-red"/> Structure de Coût - Masse Salariale</h3>
+                    <div className="w-full h-[350px] min-h-[350px]">
+                       <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={chartData}>
+                             <defs>
+                                <linearGradient id="colorHr" x1="0" y1="0" x2="0" y2="1">
+                                   <stop offset="5%" stopColor="#ef4444" stopOpacity={0.1}/>
+                                   <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                                </linearGradient>
+                             </defs>
+                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                             <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 600, fill: '#64748b'}} />
+                             <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 600, fill: '#64748b'}} tickFormatter={v => `${v/1000}k`} />
+                             <Tooltip 
+                                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', fontSize: '12px' }}
+                                formatter={(v: number) => [formatCurrency(v) + " DA", ""]}
+                             />
+                             <Area type="monotone" dataKey="Frais de Personnel" stroke="#ef4444" fillOpacity={1} fill="url(#colorHr)" strokeWidth={3} />
+                          </AreaChart>
+                       </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-8 rounded-2xl border border-sleek-border shadow-sm">
+                    <h3 className="text-sm font-bold mb-6 flex items-center gap-2"><Activity size={18} className="text-indigo-600"/> Flux Net de Trésorerie (CAF)</h3>
+                    <div className="w-full h-[350px] min-h-[350px]">
+                       <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={chartData}>
+                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                             <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 600, fill: '#64748b'}} />
+                             <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 600, fill: '#64748b'}} tickFormatter={v => `${v/1000}k`} />
+                             <Tooltip 
+                                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', fontSize: '12px' }}
+                                formatter={(v: number) => [formatCurrency(v) + " DA", ""]}
+                             />
+                             <Line type="stepAfter" dataKey="Cash-Flow (FNT)" stroke="#6366f1" strokeWidth={4} dot={{r: 6, fill: '#6366f1', strokeWidth: 2, stroke: '#fff'}} />
+                          </LineChart>
+                       </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-8 rounded-2xl border border-sleek-border shadow-sm">
+                    <h3 className="text-sm font-bold mb-6 flex items-center gap-2"><TrendingUp size={18} className="text-sleek-primary"/> Évolution des Principaux Coûts</h3>
+                    <div className="w-full h-[350px] min-h-[350px]">
+                       <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={chartData}>
+                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                             <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 600, fill: '#64748b'}} />
+                             <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 600, fill: '#64748b'}} tickFormatter={v => `${v/1000}k`} />
+                             <Tooltip 
+                                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', fontSize: '12px' }}
+                                formatter={(v: number) => [formatCurrency(v) + " DA", ""]}
+                             />
+                             <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 'bold', paddingTop: '20px' }} />
+                             <Line type="monotone" dataKey="Matières et Fournitures" stroke="#3b82f6" strokeWidth={3} dot={{r: 4}} />
+                             <Line type="monotone" dataKey="Frais de Personnel" stroke="#ef4444" strokeWidth={3} dot={{r: 4}} />
+                             <Line type="monotone" dataKey="Amortissements" stroke="#10b981" strokeWidth={3} dot={{r: 4}} />
+                          </LineChart>
+                       </ResponsiveContainer>
+                    </div>
+                  </div>
+               </motion.div>
+            )}
+
+            {activeTab === 'code' && (
+              <motion.div 
+                key="code" 
+                initial={{ opacity: 0, y: 15 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                exit={{ opacity: 0, scale: 0.98 }} 
+                transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                className="grid grid-cols-2 gap-8 h-full"
+              >
+                <div className="flex flex-col gap-4">
+                  <div className="bg-indigo-50 p-6 rounded-2xl border border-indigo-100 shadow-sm">
+                    <h3 className="font-bold flex items-center gap-2 mb-2"><Info size={18}/> Intégration Dynamique</h3>
+                    <p className="text-xs text-indigo-900/60 leading-relaxed italic">
+                      Le code ViewModel ci-dessous intègre un <b>StateFlow</b> qui combine les données d'équipements et les prévisions TCR. 
+                      Tout ajout d'équipement recalcule immédiatement les dotations du TCR.
+                    </p>
+                  </div>
+                  <CodeExport title="TCRViewModel.kt" code={KOTLIN_VIEWMODEL.trim()} icon={<Smartphone size={16}/>} />
+                </div>
+                <div className="flex flex-col gap-4">
+                  <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 shadow-sm">
+                    <h3 className="font-bold flex items-center gap-2 mb-2"><TrendingDown size={18} className="text-red-500"/> Structure du Projet</h3>
+                    <ul className="text-[11px] space-y-1.5 text-slate-500 font-medium">
+                      <li>• Fragment A: Liste des Équipements (Recycler)</li>
+                      <li>• Fragment B: Tableau d'Amortissement (Table)</li>
+                      <li>• Fragment C: TCR Dashboard (Analyse)</li>
+                    </ul>
+                  </div>
+                  <CodeExport title="layout_invest.xml" code={LAYOUT_XML.trim()} icon={<PlusCircle size={16}/>} />
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'history' && (
+              <motion.div 
+                key="history" 
+                initial={{ opacity: 0, x: 20 }} 
+                animate={{ opacity: 1, x: 0 }} 
+                exit={{ opacity: 0, x: -20 }} 
+                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-6"
+              >
+                  <div className="max-w-4xl mx-auto space-y-8">
+                     <div className="bg-white rounded-[2.5rem] p-10 border border-sleek-border shadow-xl">
+                        <h2 className="text-2xl font-black text-sleek-text-main mb-8 flex items-center gap-3 text-center justify-center">
+                          <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center text-amber-600 shadow-sm border border-amber-100">
+                             <History size={24} />
+                          </div>
+                          Historique des Simulations
+                        </h2>
+
+                        <div className="mb-8 relative max-w-lg mx-auto">
+                           <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                              <Search size={18} className="text-slate-400" />
+                           </div>
+                           <input 
+                              type="text"
+                              value={historySearchQuery}
+                              onChange={(e) => setHistorySearchQuery(e.target.value)}
+                              placeholder="Rechercher par libellé ou date (ex: 19 avr)..."
+                              className="w-full pl-12 pr-12 py-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold placeholder:text-slate-300 focus:ring-2 focus:ring-sleek-primary/20 focus:bg-white transition-all outline-none"
+                           />
+                           {historySearchQuery && (
+                              <button 
+                                 onClick={() => setHistorySearchQuery('')}
+                                 className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-300 hover:text-slate-500 transition-colors"
+                              >
+                                 <X size={18} />
+                              </button>
+                           )}
+                        </div>
+
+                        <div className="space-y-4">
+                           {filteredHistory.slice().reverse().map((snapshot, idx) => {
+                              // Calculate correct index in the original history array
+                              const originalIdx = history.findIndex(s => s.id === snapshot.id);
+                              const isCurrent = originalIdx === historyIndex;
+                              const date = new Date(snapshot.timestamp);
+                              return (
+                                 <motion.div 
+                                    key={snapshot.id}
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: idx * 0.05 }}
+                                    className={cn(
+                                       "p-6 rounded-[2rem] border transition-all flex items-center justify-between group relative overflow-hidden",
+                                       isCurrent ? "bg-sleek-primary/5 border-sleek-primary/20 shadow-md" : "bg-slate-50 border-slate-100 hover:border-sleek-primary/30 hover:bg-white hover:shadow-lg"
+                                    )}
+                                 >
+                                    <div className="flex items-center gap-8 relative z-10">
+                                       <div className={cn(
+                                          "w-14 h-14 rounded-[1.5rem] flex items-center justify-center shadow-inner transition-colors",
+                                          isCurrent ? "bg-sleek-primary text-white" : "bg-white border border-slate-100 text-slate-400 group-hover:text-sleek-primary"
+                                       )}>
+                                          <Clock size={24} />
+                                       </div>
+                                       <div className="flex flex-col">
+                                          <div className="flex items-center gap-4">
+                                             <h4 className="text-base font-black text-sleek-text-main tracking-tight">{snapshot.label || `Simulation ${history.length - idx}`}</h4>
+                                             {isCurrent && (
+                                               <span className="px-3 py-1 bg-sleek-primary text-white text-[8px] font-black uppercase tracking-[2px] rounded-full shadow-lg shadow-sleek-primary/30">
+                                                 Version Actuelle
+                                               </span>
+                                             )}
+                                          </div>
+                                          <div className="flex items-center gap-4 mt-2">
+                                             <div className="flex items-center gap-1.5 text-slate-400">
+                                                <div className="w-1.5 h-1.5 rounded-full bg-slate-200"></div>
+                                                <span className="text-[11px] font-bold uppercase tracking-widest">
+                                                   {date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                                </span>
+                                             </div>
+                                             <div className="w-1 h-1 rounded-full bg-slate-300"></div>
+                                             <span className="text-[11px] font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+                                                {date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                                             </span>
+                                          </div>
+                                       </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-3 relative z-10">
+                                       <button 
+                                          onClick={() => {
+                                             setYears(JSON.parse(JSON.stringify(snapshot.data)));
+                                             setHistoryIndex(history.length - 1 - idx);
+                                          }}
+                                          disabled={isCurrent}
+                                          className="flex items-center gap-2 px-6 py-3 bg-white border border-slate-200 rounded-2xl text-[10px] font-black uppercase tracking-[2px] text-sleek-text-main hover:border-sleek-primary hover:text-sleek-primary hover:shadow-xl transition-all disabled:opacity-0 disabled:pointer-events-none active:scale-95"
+                                       >
+                                          Restaurer cette version
+                                       </button>
+                                       <button 
+                                          onClick={() => {
+                                             if(window.confirm("Supprimer cette simulation de l'historique ?")) {
+                                                const newHistory = history.filter(s => s.id !== snapshot.id);
+                                                setHistory(newHistory);
+                                                // Adjust historyIndex if needed
+                                                if (originalIdx === historyIndex) {
+                                                   setHistoryIndex(-1);
+                                                } else if (originalIdx < historyIndex) {
+                                                   setHistoryIndex(prev => prev - 1);
+                                                }
+                                             }
+                                          }}
+                                          className="p-3 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all active:scale-90"
+                                          title="Supprimer cette version"
+                                       >
+                                          <Trash2 size={20} />
+                                       </button>
+                                    </div>
+                                    
+                                    {isCurrent && (
+                                      <div className="absolute top-0 right-0 w-32 h-32 bg-sleek-primary/5 rounded-full -mr-16 -mt-16 blur-3xl"></div>
+                                    )}
+                                 </motion.div>
+                              );
+                           })}
+
+                           {filteredHistory.length === 0 && (
+                              <div className="p-32 text-center flex flex-col items-center gap-6">
+                                 <div className="w-24 h-24 bg-slate-50 rounded-[2rem] flex items-center justify-center text-slate-200 shadow-inner">
+                                    <Search size={48} strokeWidth={1.5} />
+                                 </div>
+                                 <div className="space-y-2">
+                                    <p className="text-lg font-bold text-slate-400">Aucun résultat trouvé</p>
+                                    <p className="text-xs text-slate-300 font-medium max-w-sm mx-auto">
+                                       {history.length === 0 
+                                          ? "Sauvegardez vos simulations depuis l'onglet \"Saisie TCR\" pour enregistrer des versions de votre étude."
+                                          : `Aucune simulation ne correspond à "${historySearchQuery}".`}
+                                    </p>
+                                 </div>
+                              </div>
+                           )}
+                        </div>
+                     </div>
+                  </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'help' && (
+              <motion.div 
+                key="help" 
+                initial={{ opacity: 0, scale: 0.95 }} 
+                animate={{ opacity: 1, scale: 1 }} 
+                exit={{ opacity: 0, scale: 1.05 }} 
+                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                className="flex-1 overflow-y-auto pr-2 custom-scrollbar pb-10"
+              >
+                <div className="max-w-4xl mx-auto space-y-8">
+                  <div className="bg-white rounded-[2.5rem] p-10 border border-sleek-border shadow-xl">
+                    <h2 className="text-2xl font-black text-sleek-text-main mb-8 flex items-center gap-3">
+                      <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600">
+                        <BookOpen size={20} />
+                      </div>
+                      Guide Technique & Méthodologie
+                    </h2>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-left">
+                      <HelpCard 
+                        icon={<PieChart size={20} className="text-sleek-primary" />}
+                        title="Comptabilité Analytique Multi-Produits" 
+                        description="L'application sépare les charges directes (affectées spécifiquement au Granite ou au Tuf) et répartit les charges communes (Administration, Carburant commun, Maintenance commune, etc.) proportionnellement au tonnage extrait annuel de chaque matériau pour garantir un coût de revient mathématiquement exact."
+                        color="bg-blue-50"
+                      />
+                      <HelpCard 
+                        icon={<HardDrive size={20} className="text-sleek-accent-red" />}
+                        title="Amortissements Financiers" 
+                        description="Calcul de la dépréciation linéaire basé sur le prix d'acquisition et la durée de vie de chaque équipement. Les annuités sont automatiquement injectées dans le TCR au prorata de leur affectation (Direct Granite, Direct Tuf ou Commun)."
+                        color="bg-red-50"
+                      />
+                      <HelpCard 
+                        icon={<Users size={20} className="text-sleek-accent-green" />}
+                        title="Masse Salariale & RH" 
+                        description="Calcul consolidé incluant les salaires de base, les charges sociales patronales (taux CNAS ajustable) et une projection dynamique intégrant l'inflation salariale annuelle composée sur 10 ans."
+                        color="bg-emerald-50"
+                      />
+                      <HelpCard 
+                        icon={<Activity size={20} className="text-indigo-600" />}
+                        title="Cash-Flow (FNT)" 
+                        description="Flux Net de Trésorerie calculé par la somme : Résultat Net + Dotations aux Amortissements. C'est l'indicateur clé de la capacité d'autofinancement et de la liquidité réelle générée par l'exploitation minière."
+                        color="bg-indigo-50"
+                      />
+                      <HelpCard 
+                        icon={<Calculator size={20} className="text-orange-600" />}
+                        title="Coût de Revient (DA/T)" 
+                        description="Formule : (Total Charges Directes Produit + Quote-part Charges Communes) / Tonnage Extrait. Ce coût est indispensable pour fixer un prix de vente compétitif tout en assurant la rentabilité du site."
+                        color="bg-orange-50"
+                      />
+                      <HelpCard 
+                        icon={<HardHat size={20} className="text-slate-600" />}
+                        title="Hypothèses de Calcul" 
+                        description="Le taux d'IBM (Impôt sur les Bénéfices) et les taux d'inflation sont paramétrables dans les réglages avancés pour simuler différents scénarios économiques algériens."
+                        color="bg-slate-50"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900 rounded-[2.5rem] p-10 border border-slate-800 text-white shadow-2xl relative overflow-hidden group">
+                     <div className="absolute -top-24 -right-24 w-64 h-64 bg-sleek-primary/20 rounded-full blur-[100px] group-hover:bg-sleek-primary/30 transition-colors duration-1000"></div>
+                     <div className="relative z-10">
+                        <h3 className="text-xl font-black mb-6 flex items-center gap-3">
+                          <Edit3 size={20} className="text-sleek-primary" />
+                          Notes & Hypothèses du Projet
+                        </h3>
+                        <p className="text-xs text-slate-400 mb-6 leading-relaxed max-w-2xl">
+                          Utilisez cet espace pour documenter vos hypothèses spécifiques (densité des terrains, ratios de foisonnement, contraintes géotechniques) afin qu'elles apparaissent dans vos dossiers universitaires.
+                        </p>
+                        <textarea 
+                          value={userNotes}
+                          onChange={(e) => setUserNotes(e.target.value)}
+                          placeholder="Exemple: Hypothèse de foisonnement des matériaux: 1.25..."
+                          className="w-full h-48 bg-white/5 border border-white/10 rounded-2xl p-6 text-sm font-medium focus:ring-2 focus:ring-sleek-primary/50 transition-all outline-none resize-none placeholder:text-slate-600"
+                        />
+                     </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'about' && (
+              <motion.div 
+                key="about" 
+                initial={{ opacity: 0, scale: 0.95 }} 
+                animate={{ opacity: 1, scale: 1 }} 
+                exit={{ opacity: 0, scale: 1.05 }} 
+                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                className="flex-1 overflow-y-auto pr-2 custom-scrollbar pb-10"
+              >
+                <div className="w-full max-w-2xl mx-auto bg-white rounded-[2.5rem] border border-sleek-border shadow-2xl overflow-hidden relative group mb-8">
+                  {/* Decorative Background Element */}
+                  <div className="absolute top-0 left-0 w-full h-48 bg-gradient-to-br from-sleek-primary/10 via-indigo-50 to-transparent -z-0"></div>
+                  <div className="absolute top-12 right-12 w-32 h-32 bg-sleek-primary/5 rounded-full blur-3xl"></div>
+                  
+                  <div className="relative z-10 p-12 flex flex-col items-center text-center">
+                    {/* Avatar Header */}
+                    <div className="relative mb-8">
+                       <div className="w-40 h-40 bg-white rounded-full p-1.5 shadow-xl border border-slate-100 flex items-center justify-center relative z-10">
+                          <div className="w-full h-full bg-slate-50 rounded-full flex items-center justify-center text-sleek-primary">
+                             <HardHat size={64} strokeWidth={1.5} />
+                          </div>
+                       </div>
+                       <motion.div 
+                         initial={{ scale: 0 }}
+                         animate={{ scale: 1 }}
+                         transition={{ delay: 0.3 }}
+                         className="absolute -bottom-2 -right-2 w-12 h-12 bg-sleek-accent-green rounded-2xl flex items-center justify-center text-white shadow-lg border-4 border-white"
+                        >
+                         <Check size={20} strokeWidth={3} />
+                       </motion.div>
+                    </div>
+
+                    {/* Content */}
+                    <h2 className="text-3xl font-black text-sleek-text-main tracking-tight mb-2">MOUAIA Louai</h2>
+                    <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-blue-50 rounded-full text-sleek-primary text-xs font-bold uppercase tracking-wider mb-8">
+                       <GraduationCap size={14} />
+                       Étudiant en Master : Génie Minier
+                    </div>
+
+                    <div className="relative mb-12 max-w-lg">
+                       <span className="absolute -top-6 -left-4 text-6xl text-slate-100 font-serif">“</span>
+                       <p className="text-lg text-sleek-text-muted font-medium italic leading-relaxed relative z-10">
+                         Cette application est conçue pour faciliter et calculer des études de faisabilité complexes pour les projets de carrières.
+                       </p>
+                       <span className="absolute -bottom-10 -right-4 text-6xl text-slate-100 font-serif">”</span>
+                    </div>
+
+                    {/* Contact Badges */}
+                    <div className="grid grid-cols-2 gap-4 w-full">
+                       <a 
+                        href="mailto:mouaialouai4@gmail.com" 
+                        className="flex items-center justify-center gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-sleek-primary hover:bg-white hover:shadow-lg hover:shadow-sleek-primary/5 transition-all group/contact active:scale-[0.98]"
+                       >
+                         <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-sleek-text-muted group-hover/contact:text-sleek-primary shadow-sm transition-colors border border-slate-50">
+                            <Mail size={18} />
+                         </div>
+                         <div className="flex flex-col items-start">
+                            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Email</span>
+                            <span className="text-sm font-bold text-sleek-text-main">mouaialouai4@gmail.com</span>
+                         </div>
+                       </a>
+
+                       <a 
+                        href="tel:0656874473" 
+                        className="flex items-center justify-center gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-sleek-accent-green hover:bg-white hover:shadow-lg hover:shadow-sleek-accent-green/5 transition-all group/contact active:scale-[0.98]"
+                       >
+                         <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-sleek-text-muted group-hover/contact:text-sleek-accent-green shadow-sm transition-colors border border-slate-50">
+                            <Phone size={18} />
+                         </div>
+                         <div className="flex flex-col items-start">
+                            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Téléphone</span>
+                            <span className="text-sm font-bold text-sleek-text-main">06 56 87 44 73</span>
+                         </div>
+                       </a>
+                    </div>
+
+                    <div className="mt-12 pt-8 border-t border-slate-50 w-full flex flex-col items-center">
+                       <div className="flex items-center justify-center gap-6 opacity-30 grayscale hover:grayscale-0 hover:opacity-100 transition-all text-center flex-wrap">
+                          <div className="flex items-center gap-2"><Building size={14} /><span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Université Cheikh Larbi Tébessa</span></div>
+                          <div className="w-1 h-1 rounded-full bg-slate-300 shrink-0"></div>
+                          <div className="flex items-center gap-2"><Users size={14} /><span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap">Collaborateurs : Dr. Saadaoui Salah & MAYOUF MOUMEN</span></div>
+                       </div>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function NavItem({ active, onClick, icon, label }: { active: boolean, onClick: () => void, icon: React.ReactNode, label: string }) {
+  return (
+    <button 
+      onClick={onClick} 
+      className={cn(
+        "relative w-full flex items-center gap-3 px-8 py-3.5 text-sm transition-colors duration-300", 
+        active ? "text-white opacity-100 bg-white/5" : "text-white opacity-40 hover:opacity-100 hover:bg-white/5"
+      )}
+    >
+      {active && (
+        <motion.div 
+          layoutId="sidebar-active"
+          className="absolute left-0 top-0 bottom-0 w-1 bg-sleek-primary shadow-[0_0_12px_rgba(59,130,246,0.5)]"
+          initial={false}
+          transition={{ type: "spring", stiffness: 300, damping: 30 }}
+        />
+      )}
+      <span className={cn(active ? "text-sleek-primary" : "text-white", "transition-colors duration-300")}>{icon}</span>
+      <span className="font-medium tracking-wide">{label}</span>
+    </button>
+  );
+}
+
+function CompactStatCard({ label, value, formula }: { label: string, value: string, formula?: string }) {
+  return (
+    <div className="bg-white p-4 rounded-xl border border-sleek-border shadow-sm flex flex-col gap-1 hover:border-sleek-primary/30 transition-colors group relative cursor-help">
+      <span className="text-[9px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-60 flex items-center gap-1">
+        {label}
+        {formula && <Info size={10} className="opacity-40" />}
+      </span>
+      <span className="text-sm font-extrabold text-sleek-text-main tracking-tight">{value}</span>
+      {formula && <FormulaTooltip formula={formula} />}
+    </div>
+  );
+}
+
+function FormulaTooltip({ formula }: { formula: string }) {
+  return (
+    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 scale-95 group-hover:scale-100 pointer-events-none transition-all duration-200 z-[100] w-56 p-3 bg-slate-800/95 text-white text-[10px] rounded-xl shadow-2xl ring-1 ring-white/10 backdrop-blur-md animate-none">
+      <div className="relative">
+        <div className="flex items-center gap-2 mb-1.5 border-b border-white/10 pb-1.5">
+          <Calculator size={12} className="text-sleek-primary" />
+          <span className="font-bold uppercase tracking-wider text-[9px] opacity-70">Calcul de l'indicateur</span>
+        </div>
+        <p className="leading-relaxed font-medium">{formula}</p>
+        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-3 border-8 border-transparent border-t-slate-800/95"></div>
+      </div>
+    </div>
+  );
+}
+
+function InputGroupVertical({ label, value, onChange, onBlur, type = "text", helper, readOnly }: { label: string, value: string, onChange: (v: string) => void, onBlur?: () => void, type?: string, helper?: string, readOnly?: boolean }) {
+  return (
+    <div className={cn("space-y-1.5 min-w-0", readOnly && "opacity-50 grayscale select-none")}>
+      <label className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-70 px-1">{label}</label>
+      <input 
+        type={type} 
+        value={value} 
+        onChange={e => !readOnly && onChange(e.target.value)} 
+        onBlur={onBlur}
+        readOnly={readOnly}
+        className={cn(
+          "w-full border border-sleek-border rounded-xl px-4 py-3 text-sm font-semibold transition-all outline-none shadow-inner",
+          readOnly ? "bg-slate-200 cursor-not-allowed" : "bg-slate-50 focus:ring-2 focus:ring-sleek-primary/10 focus:bg-white focus:border-sleek-primary"
+        )}
+      />
+      {helper && <p className="text-[9px] text-sleek-text-muted italic opacity-60 px-1">*{helper}</p>}
+    </div>
+  );
+}
+
+function InputGroup({ label, value, onChange, onBlur, suffix, readOnly, isAuto, formula }: { label: string, value: number, onChange: (v: number) => void, onBlur?: () => void, suffix?: string, readOnly?: boolean, isAuto?: boolean, formula?: string }) {
+  return (
+    <div className={cn("space-y-1.5 min-w-0", readOnly && "opacity-60")}>
+      <label className="text-[10px] font-bold uppercase tracking-wider text-sleek-text-muted opacity-60 block truncate flex items-center gap-1.5 group relative">
+        <span className="flex items-center gap-1 cursor-help">
+          {label}
+          {formula && <Info size={10} className="opacity-40" />}
+        </span>
+        {isAuto && (
+          <span className="inline-flex items-center" title="Calculé automatiquement mais modifiable manuellement">
+            <Activity size={10} className="text-sleek-primary animate-pulse" />
+          </span>
+        )}
+        {formula && <FormulaTooltip formula={formula} />}
+      </label>
+      <div className="relative group">
+        <input 
+          type="number" 
+          value={value || ''} 
+          placeholder="0" 
+          onChange={(e) => !readOnly && onChange(Number(e.target.value))} 
+          onBlur={onBlur}
+          readOnly={readOnly}
+          className={cn(
+            "w-full border rounded-lg pl-3 pr-8 py-2 font-mono text-[12px] font-bold transition-all",
+            readOnly ? "bg-slate-100 border-sleek-border cursor-not-allowed" : "bg-sleek-bg/50 border-sleek-border focus:outline-none focus:ring-2 focus:ring-sleek-primary/20 focus:bg-white focus:border-sleek-primary",
+            isAuto && !readOnly && "border-sleek-primary/30 bg-blue-50/20"
+          )}
+        />
+        {suffix && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-bold opacity-30">{suffix}</span>}
+      </div>
+    </div>
+  );
+}
+
+function SleekRow({ label, values, total, format, type, formula }: { label: string, values: number[], total: number, format: (n: number) => string, type?: 'subtotal' | 'added-value' | 'total', formula?: string }) {
+  return (
+    <tr className={cn(
+      "border-b border-slate-50 transition-colors group/row even:bg-slate-50/20", 
+      type === 'subtotal' && "text-sleek-accent-red font-bold bg-red-50/30", 
+      type === 'added-value' && "text-indigo-600 font-bold bg-indigo-50/30", 
+      type === 'total' && "bg-[#eff6ff] font-extrabold text-sleek-primary border-t-2 border-sleek-primary shadow-sm"
+    )}>
+      <td className={cn(
+        "p-4 text-left sticky left-0 z-40 border-r border-sleek-border font-bold text-sleek-text-muted transition-colors uppercase text-[9px] tracking-tight relative group/label cursor-help shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]", 
+        type === 'added-value' ? "bg-indigo-50/80" : type === 'subtotal' ? "bg-red-50/80" : type === 'total' ? "bg-blue-100/90" : "bg-white group-hover/row:bg-slate-50 group-even/row:bg-slate-50/50"
+      )}>
+        <div className="flex items-center gap-1.5">
+          {label}
+          {formula && <Info size={10} className="opacity-30 group-hover/label:opacity-100 transition-opacity" />}
+        </div>
+        {formula && (
+          <div className="absolute left-[80%] bottom-full mb-2 opacity-0 group-hover/label:opacity-100 scale-95 group-hover/label:scale-100 transition-all duration-200 z-[100] w-64 p-3 bg-slate-800/95 text-white text-[10px] rounded-xl shadow-2xl pointer-events-none ring-1 ring-white/10 backdrop-blur-md normal-case tracking-normal font-sans">
+             <div className="flex items-center gap-2 mb-1.5 border-b border-white/10 pb-1.5">
+                <Calculator size={12} className="text-sleek-primary" />
+                <span className="font-bold uppercase tracking-wider text-[9px] opacity-70">Formule de calcul</span>
+             </div>
+             {formula}
+             <div className="absolute top-full left-4 border-8 border-transparent border-t-slate-800/95"></div>
+          </div>
+        )}
+      </td>
+      {values.map((v, i) => (
+        <td key={i} className="p-4 text-right whitespace-nowrap tabular-nums opacity-90 group-hover/row:opacity-100 transition-opacity">
+          {format(v)}
+        </td>
+      ))}
+      <td className={cn(
+        "p-4 text-right font-bold whitespace-nowrap tabular-nums z-40 sticky right-0 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.05)] transition-colors", 
+        type === 'added-value' ? "bg-indigo-50" : type === 'subtotal' ? "bg-red-50" : type === 'total' ? "bg-blue-100" : "bg-slate-50 group-hover/row:bg-slate-100"
+      )}>
+        {format(total)}
+      </td>
+    </tr>
+  );
+}
+
+function DashboardKPI({ icon, label, value, suffix, formula }: { icon: React.ReactNode, label: string, value: string, suffix?: string, formula?: string }) {
+  return (
+    <div className="bg-white rounded-2xl border border-sleek-border shadow-sm p-6 flex items-center gap-5 hover:shadow-md transition-shadow group relative cursor-help">
+      <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-sleek-primary shrink-0 border border-slate-100">
+        {icon}
+      </div>
+      <div className="flex flex-col">
+        <span className="text-[10px] font-bold text-sleek-text-muted uppercase tracking-[2px] mb-1 flex items-center gap-1.5">
+          {label}
+          {formula && <Info size={10} className="opacity-40" />}
+        </span>
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-xl font-black text-sleek-text-main tracking-tight">{value}</span>
+          {suffix && <span className="text-[10px] font-extrabold text-sleek-text-muted opacity-40 uppercase">{suffix}</span>}
+        </div>
+      </div>
+      {formula && <FormulaTooltip formula={formula} />}
+    </div>
+  );
+}
+
+function CodeExport({ title, code, icon }: { title: string, code: string, icon: React.ReactNode }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 2000); };
+  return (
+    <div className="bg-[#1e293b] rounded-2xl border border-white/10 overflow-hidden flex flex-col h-full shadow-2xl relative">
+      <div className="bg-white/5 px-6 py-4 flex items-center justify-between border-b border-white/10 shrink-0">
+        <div className="flex items-center gap-2 text-white/50"><span className="text-sleek-primary">{icon}</span><span className="text-[10px] font-bold uppercase tracking-widest">{title}</span></div>
+        <button onClick={copy} className="p-2 text-white/40 hover:text-white transition-colors bg-white/5 rounded-lg border border-white/5">{copied ? <Check size={16} className="text-green-400" /> : <Copy size={16} />}</button>
+      </div>
+      <div className="flex-1 overflow-auto p-6 font-mono text-[10px] text-sky-200/50 leading-relaxed scrollbar-thin scrollbar-thumb-white/10"><pre><code>{code}</code></pre></div>
+    </div>
+  );
+}
+
+function HelpCard({ icon, title, description, color }: { icon: React.ReactNode, title: string, description: string, color: string }) {
+  return (
+    <div className={cn("p-6 rounded-3xl border border-slate-100 shadow-sm transition-all hover:shadow-md hover:scale-[1.02]", color)}>
+      <div className="flex items-center gap-4 mb-4">
+        <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm">
+          {icon}
+        </div>
+        <h4 className="font-extrabold text-sm text-sleek-text-main leading-tight uppercase tracking-tight">{title}</h4>
+      </div>
+      <p className="text-xs text-sleek-text-muted leading-relaxed font-medium">
+        {description}
+      </p>
+    </div>
+  );
+}
+
+function AssumptionItem({ title, description }: { title: string, description: string }) {
+  const [isOpen, setIsOpen] = useState(false);
+  return (
+    <div className="border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+      <button 
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center justify-between p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors text-left"
+      >
+        <span className="text-sm font-bold text-sleek-text-main">{title}</span>
+        <PlusCircle size={16} className={cn("text-slate-300 transition-transform duration-300", isOpen && "rotate-45")} />
+      </button>
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden bg-white"
+          >
+            <div className="p-4 text-xs font-medium text-sleek-text-muted leading-relaxed border-t border-slate-50">
+              {description}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
