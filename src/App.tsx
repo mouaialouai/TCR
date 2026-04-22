@@ -39,7 +39,8 @@ import {
   HardHat,
   ExternalLink,
   Mountain,
-  Building
+  Building,
+  Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -60,8 +61,8 @@ import {
   Cell
 } from 'recharts';
 import { cn } from './lib/utils';
-import { AnnualData, Equipment, EmployeeRole, HRConfig, OperationalMachine, OperationalConfig, InvestmentCategory, CalculationSnapshot } from './types';
-import { calculateYear, calculateTotals, getAmortizationSchedule, getHRCosts, getOperationalCosts } from './lib/calculations';
+import { AnnualData, Equipment, EmployeeRole, HRConfig, OperationalMachine, OperationalConfig, InvestmentCategory, CalculationSnapshot, ElectricityLine, ElectricityConfig, AccessoryConfig, AccessoryItem, Allocation, AccessoryCalculationMode, ProductionDimensioning } from './types';
+import { calculateYear, calculateTotals, getAmortizationSchedule, getHRCosts, getOperationalCosts, getElectricityCosts, getAccessoryCosts } from './lib/calculations';
 import { KOTLIN_VIEWMODEL, LAYOUT_XML } from './lib/androidCodeTemplates';
 
 const INITIAL_YEARS: AnnualData[] = Array.from({ length: 10 }, (_, i) => ({
@@ -97,7 +98,24 @@ function useLocalStorage<T>(key: string, initialValue: T) {
   const [storedValue, setStoredValue] = useState<T>(() => {
     try {
       const item = window.localStorage.getItem(key);
-      return item ? JSON.parse(item) : initialValue;
+      if (!item) return initialValue;
+      
+      const parsed = JSON.parse(item);
+      
+      // If it's an object (and not an array), merge it with initialValue 
+      // to ensure new properties are populated
+      if (
+        typeof parsed === 'object' && 
+        parsed !== null && 
+        !Array.isArray(parsed) && 
+        typeof initialValue === 'object' && 
+        initialValue !== null &&
+        !Array.isArray(initialValue)
+      ) {
+        return { ...initialValue, ...parsed } as T;
+      }
+      
+      return parsed;
     } catch (error) {
       console.error(`Error reading localStorage key "${key}":`, error);
       return initialValue;
@@ -121,106 +139,163 @@ function useLocalStorage<T>(key: string, initialValue: T) {
 }
 
 export default function App() {
-  const [userNotes, setUserNotes] = useLocalStorage<string>('app_user_notes', '');
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'edit' | 'table' | 'invest' | 'hr' | 'ops' | 'charts' | 'history' | 'code' | 'about' | 'help'>('dashboard');
-  const [years, setYears] = useLocalStorage<AnnualData[]>('app_tcr_data', INITIAL_YEARS);
-  const [equipments, setEquipments] = useLocalStorage<Equipment[]>('app_investissements', INITIAL_EQUIPMENTS);
-  const [ibmRate, setIbmRate] = useLocalStorage<number>('app_settings_ibm', 0.12);
+  const SAVE_KEY = 'graniteapp_saved_state_v1';
 
-  // New HR State
-  const [roles, setRoles] = useLocalStorage<EmployeeRole[]>('app_employes', []);
-  const [hrConfig, setHrConfig] = useLocalStorage<HRConfig>('app_hr_config', {
+  // Helper to load initial state from localStorage
+  const loadInitialState = () => {
+    try {
+      const saved = window.localStorage.getItem(SAVE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error("Erreur lors du chargement de la sauvegarde :", e);
+    }
+    return null;
+  };
+
+  const initialState = loadInitialState();
+
+  const [userNotes, setUserNotes] = useState<string>(initialState?.userNotes ?? '');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'prod' | 'edit' | 'table' | 'invest' | 'hr' | 'ops' | 'elec' | 'acc' | 'charts' | 'code' | 'about' | 'help'>('dashboard');
+  const [years, setYears] = useState<AnnualData[]>(initialState?.years ?? INITIAL_YEARS);
+  const [equipments, setEquipments] = useState<Equipment[]>(initialState?.equipments ?? INITIAL_EQUIPMENTS);
+  const [ibmRate, setIbmRate] = useState<number>(initialState?.ibmRate ?? 0.12);
+
+  // HR State
+  const [roles, setRoles] = useState<EmployeeRole[]>(initialState?.roles ?? []);
+  const [hrConfig, setHrConfig] = useState<HRConfig>(initialState?.hrConfig ?? {
     socialChargesRate: 0.26,
     annualIncreaseRate: 0.03,
     paidMonths: 12
   });
 
-  // New Operational State
-  const [machines, setMachines] = useLocalStorage<OperationalMachine[]>('app_operational_machines', []);
-  const [opConfig, setOpConfig] = useLocalStorage<OperationalConfig>('app_operational_config', {
+  // Operational State
+  const [machines, setMachines] = useState<OperationalMachine[]>(() => {
+    const base = initialState?.machines ?? [];
+    return base.map((m: any) => ({
+      ...m,
+      hoursPerDay: m.hoursPerDay ?? initialState?.opConfig?.hoursPerDay ?? 8,
+      workDaysPerYear: m.workDaysPerYear ?? initialState?.opConfig?.workDaysPerYear ?? 250
+    }));
+  });
+  const [opConfig, setOpConfig] = useState<OperationalConfig>(initialState?.opConfig ?? {
     fuelPrice: 29,
     workDaysPerYear: 250,
+    hoursPerDay: 8,
     annualInflationRate: 3
   });
 
-  const [isSettingsExpanded, setIsSettingsExpanded] = useState(false);
-  
-  // History for Undo/Redo (Persisted for historical viewing)
-  const [history, setHistory] = useLocalStorage<CalculationSnapshot[]>('app_calculation_history', []);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const [historySearchQuery, setHistorySearchQuery] = useState('');
-
-  const filteredHistory = useMemo(() => {
-    if (!historySearchQuery.trim()) return history;
-    const query = historySearchQuery.toLowerCase().trim();
-    return history.filter(snapshot => {
-      const label = (snapshot.label || "").toLowerCase();
-      const date = new Date(snapshot.timestamp);
-      const dateStr = date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }).toLowerCase();
-      const timeStr = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }).toLowerCase();
-      return label.includes(query) || dateStr.includes(query) || timeStr.includes(query);
-    });
-  }, [history, historySearchQuery]);
-
-  const pushToHistory = (data: AnnualData[], label?: string) => {
-    const newSnapshot: CalculationSnapshot = {
-      id: Math.random().toString(36).substr(2, 9),
-      timestamp: new Date().toISOString(),
-      data: JSON.parse(JSON.stringify(data)),
-      label: label
+  // Electricity State
+  const [electricityLines, setElectricityLines] = useState<ElectricityLine[]>(() => {
+    const base = initialState?.electricityLines ?? [];
+    return base.map((l: any) => ({
+      ...l,
+      hoursPerDay: l.hoursPerDay ?? initialState?.electricityConfig?.hoursPerDay ?? 8,
+      workDaysPerYear: l.workDaysPerYear ?? initialState?.electricityConfig?.workDaysPerYear ?? 250
+    }));
+  });
+  const [electricityConfig, setElectricityConfig] = useState<ElectricityConfig>(() => {
+    const base = initialState?.electricityConfig ?? {
+      cosPhi: 0.8,
+      kvaPerGroup: 500,
+      specificConsumption: 0.30,
+      workDaysPerYear: 250,
+      hoursPerDay: 8
     };
-    const newHistory = history.slice(0, historyIndex + 1);
-    newHistory.push(newSnapshot);
-    if (newHistory.length > 50) newHistory.shift();
-    setHistory(newHistory);
-    setHistoryIndex(newHistory.length - 1);
-  };
-
-  const undo = () => {
-    if (historyIndex > 0) {
-      const prevIndex = historyIndex - 1;
-      const prevState = history[prevIndex];
-      setYears(JSON.parse(JSON.stringify(prevState.data)));
-      setHistoryIndex(prevIndex);
+    // Migration: If these fields weren't independent before, take them from opConfig
+    if (base.workDaysPerYear === undefined) {
+      base.workDaysPerYear = initialState?.opConfig?.workDaysPerYear ?? 250;
     }
-  };
-
-  const redo = () => {
-    if (historyIndex < history.length - 1) {
-      const nextIndex = historyIndex + 1;
-      const nextState = history[nextIndex];
-      setYears(JSON.parse(JSON.stringify(nextState.data)));
-      setHistoryIndex(nextIndex);
+    if (base.hoursPerDay === undefined) {
+      base.hoursPerDay = initialState?.opConfig?.hoursPerDay ?? 8;
     }
-  };
+    return base;
+  });
 
-  // Initialize history
-  useEffect(() => {
-    if (historyIndex === -1 && years.length > 0) {
-      if (history.length > 0) {
-        setHistoryIndex(history.length - 1);
-      } else {
-        const initialSnapshot: CalculationSnapshot = {
-          id: 'initial',
-          timestamp: new Date().toISOString(),
-          data: JSON.parse(JSON.stringify(years)),
-          label: 'État Initial'
-        };
-        setHistory([initialSnapshot]);
-        setHistoryIndex(0);
+  // Accessory State
+  const [accessoryConfig, setAccessoryConfig] = useState<AccessoryConfig>(initialState?.accessoryConfig ?? {
+    items: []
+  });
+
+  // Form states for new accessory
+  const [newAccName, setNewAccName] = useState('');
+  const [newAccQty, setNewAccQty] = useState('');
+  const [newAccPrice, setNewAccPrice] = useState('');
+  const [newAccUnit, setNewAccUnit] = useState('m');
+  const [newAccAlloc, setNewAccAlloc] = useState<Allocation>('Common');
+  
+  // Diamond Wire Card/Modal State
+  const [isDiamondModalOpen, setIsDiamondModalOpen] = useState(false);
+  const [dmDesignation, setDmDesignation] = useState('Fil diamanté');
+  const [dmQty, setDmQty] = useState('0');
+  const [dmUnitPrice, setDmUnitPrice] = useState('0');
+  const [dmAlloc, setDmAlloc] = useState<Allocation>('Common');
+
+  // Production State
+  const [productionConfig, setProductionConfig] = useState<ProductionDimensioning>(initialState?.productionConfig ?? {
+    horizon: '1y',
+    targetMode: 'constant',
+    vTargetConstant: 10000,
+    vTargetVariable: Array(10).fill(10000),
+    yieldsConstant: { eta1: 0.5, eta2: 0.8 },
+    yieldsVariable: { eta1: Array(10).fill(0.5), eta2: Array(10).fill(0.8) },
+    steps: {
+      extraction: {
+        name: "Extraction gros blocs",
+        dimensions: { l: 10, w: 10, h: 1.6 },
+        productivity: { vs: 20, hEq: 1.6, hoursPerDay: 8, daysPerYear: 250, utilizationRate: 1 }
+      },
+      retaille: {
+        name: "Retaille des blocs",
+        dimensions: { l: 2.15, w: 1.5, h: 1.4 },
+        productivity: { vs: 30, hEq: 1.4, hoursPerDay: 8, daysPerYear: 250, utilizationRate: 1 }
       }
     }
-  }, [years, historyIndex, history]);
+  });
 
-  // Initial snapshots for specific actions
-  const saveManualSnapshot = () => {
-    const label = window.prompt("Nom de la simulation :", `Simulation ${history.length + 1}`);
-    if (label !== null) {
-      pushToHistory(years, label || `Simulation ${history.length + 1}`);
+  const [dmVs, setDmVs] = useState(initialState?.dmParams?.vs ?? '20');
+  const [dmCfu, setDmCfu] = useState(initialState?.dmParams?.cfu ?? '0.5');
+  const [dmHj, setDmHj] = useState(initialState?.dmParams?.hj ?? '8');
+  const [dmJa, setDmJa] = useState(initialState?.dmParams?.ja ?? '250');
+  const [dmN, setDmN] = useState(initialState?.dmParams?.n ?? '1');
+
+  const [isSettingsExpanded, setIsSettingsExpanded] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+
+  const handleSave = () => {
+    try {
+      const stateToSave = {
+        userNotes,
+        years,
+        equipments,
+        roles,
+        hrConfig,
+        machines,
+        opConfig,
+        electricityLines,
+        electricityConfig,
+        accessoryConfig,
+        ibmRate,
+        dmParams: { vs: dmVs, cfu: dmCfu, hj: dmHj, ja: dmJa, n: dmN },
+        productionConfig,
+        lastSaved: new Date().toISOString()
+      };
+      window.localStorage.setItem(SAVE_KEY, JSON.stringify(stateToSave));
+      setSaveMessage("Sauvegarde réussie !");
+      setTimeout(() => setSaveMessage(null), 3000);
+    } catch (e) {
+      console.error("Erreur lors de la sauvegarde :", e);
+      alert("Erreur lors de la sauvegarde.");
     }
   };
 
-  // Reset Application Data
+  const handleResetSave = () => {
+    if (window.confirm("Êtes-vous sûr de vouloir supprimer la sauvegarde ? Toutes les données non enregistrées seront perdues au rechargement.")) {
+      window.localStorage.removeItem(SAVE_KEY);
+      window.location.reload();
+    }
+  };
+
+  // Reset Application Data (Full reset)
   const handleResetData = () => {
     if (window.confirm("Êtes-vous sûr de vouloir réinitialiser toutes les données ? Cette action est irréversible et effacera toute votre étude en cours.")) {
       window.localStorage.clear();
@@ -230,10 +305,10 @@ export default function App() {
   
   // New operational form state
   const [newOpName, setNewOpName] = useState('');
-  const [newOpCons, setNewOpCons] = useState('');
-  const [newOpHours, setNewOpHours] = useState('');
-  const [newOpValue, setNewOpValue] = useState('');
-  const [newOpMaint, setNewOpMaint] = useState('5');
+  const [newOpPower, setNewOpPower] = useState('');
+  const [newOpCount, setNewOpCount] = useState('1');
+  const [newOpConsRate, setNewOpConsRate] = useState('0.2');
+  const [newOpUtilCoef, setNewOpUtilCoef] = useState('0.7');
   const [newOpAlloc, setNewOpAlloc] = useState<'Granite' | 'Tuf' | 'Common'>('Common');
   
   // New roles form state
@@ -248,6 +323,12 @@ export default function App() {
   const [newEqDuration, setNewEqDuration] = useState('');
   const [newEqCategory, setNewEqCategory] = useState<InvestmentCategory>("Équipements Lourds & Matériel");
   const [newEqAlloc, setNewEqAlloc] = useState<'Granite' | 'Tuf' | 'Common'>('Common');
+  
+  // New electricity form state
+  const [newElecName, setNewElecName] = useState('');
+  const [newElecPower, setNewElecPower] = useState('');
+  const [newElecCount, setNewElecCount] = useState('1');
+  const [newElecUtilCoef, setNewElecUtilCoef] = useState('0.7');
 
   // 1. Calculate Amortization Schedule
   const amortResults = useMemo(() => getAmortizationSchedule(equipments), [equipments]);
@@ -258,28 +339,16 @@ export default function App() {
   // 3. Calculate Operational Costs (Fuel & Maintenance)
   const opResults = useMemo(() => getOperationalCosts(machines, opConfig), [machines, opConfig]);
   
-  // 5. Sync Automated Results into Years State (Manual Override Support)
-  useEffect(() => {
-    setYears(prev => prev.map((y, idx) => {
-      const fuelTotal = opResults.fuel.granite[idx] + opResults.fuel.tuf[idx] + opResults.fuel.common[idx];
-      const maintTotal = opResults.maintenance.granite[idx] + opResults.maintenance.tuf[idx] + opResults.maintenance.common[idx];
-      const hrTotal = hrTotals.granite[idx] + hrTotals.tuf[idx] + hrTotals.common[idx];
-      const amortTotal = amortResults.annualTotals.granite[idx] + amortResults.annualTotals.tuf[idx] + amortResults.annualTotals.common[idx];
-      
-      return {
-        ...y,
-        dotationsAmortissements: amortTotal,
-        fraisPersonnel: hrTotal,
-        matieresFournitures: fuelTotal,
-        services: maintTotal
-      };
-    }));
-  }, [amortResults, hrTotals, opResults]);
+  // 4. Calculate Electricity Costs
+  const electricityResults = useMemo(() => getElectricityCosts(electricityLines, electricityConfig, opConfig), [electricityLines, electricityConfig, opConfig]);
 
-  // 6. Final TCR Calculation (using the synced years state)
+  // 5. Calculate Accessory Costs
+  const accessoryResults = useMemo(() => getAccessoryCosts(accessoryConfig, opConfig.annualInflationRate), [accessoryConfig, opConfig.annualInflationRate]);
+
+  // 6. Final TCR Calculation (using the manual data + automated overrides inside calculateYear)
   const calculatedYears = useMemo(() => 
-    years.map((y, idx) => calculateYear(y, ibmRate, opResults.fuel, opResults.maintenance, hrTotals, amortResults.annualTotals, idx)), 
-  [years, ibmRate, opResults, hrTotals, amortResults]);
+    years.map((y, idx) => calculateYear(y, ibmRate, opResults.fuel, opResults.maintenance, hrTotals, amortResults.annualTotals, electricityResults, accessoryResults, idx)), 
+  [years, ibmRate, opResults, hrTotals, amortResults, electricityResults, accessoryResults]);
 
   const totalRow = useMemo(() => calculateTotals(calculatedYears), [calculatedYears]);
   const totalInvestment = useMemo(() => equipments.reduce((sum, e) => sum + e.price, 0), [equipments]);
@@ -288,10 +357,6 @@ export default function App() {
     const newYears = [...years];
     newYears[yearIndex] = { ...newYears[yearIndex], [field]: value };
     setYears(newYears);
-    // Debounced or throttled push would be better, but for simplicity we push major changes or label them
-    if (field === 'extractionGranite' || field === 'extractionTuf') {
-      pushToHistory(newYears, `Modif. Production Année ${yearIndex + 1}`);
-    }
   };
 
   const addEquipment = () => {
@@ -334,15 +399,17 @@ export default function App() {
   };
 
   const addMachine = () => {
-    if (!newOpName || !newOpCons || !newOpHours || !newOpValue) return;
+    if (!newOpName || !newOpPower || !newOpCount) return;
     const machine: OperationalMachine = {
       id: Math.random().toString(36).substr(2, 9),
       designation: newOpName,
-      hourlyConsumption: Number(newOpCons),
-      hoursPerDay: Number(newOpHours),
-      assetValue: Number(newOpValue),
-      maintenanceRate: Number(newOpMaint),
-      allocation: newOpAlloc
+      powerKw: Number(newOpPower),
+      count: Number(newOpCount),
+      consumptionRate: Number(newOpConsRate),
+      utilizationCoef: Number(newOpUtilCoef),
+      allocation: newOpAlloc,
+      workDaysPerYear: opConfig.workDaysPerYear,
+      hoursPerDay: opConfig.hoursPerDay
     };
     setMachines([...machines, machine]);
     resetOpForm();
@@ -350,15 +417,116 @@ export default function App() {
 
   const resetOpForm = () => {
     setNewOpName('');
-    setNewOpCons('');
-    setNewOpHours('');
-    setNewOpValue('');
-    setNewOpMaint('5');
+    setNewOpPower('');
+    setNewOpCount('1');
+    setNewOpConsRate('0.2');
+    setNewOpUtilCoef('0.7');
     setNewOpAlloc('Common');
   };
 
   const removeMachine = (id: string) => {
     setMachines(machines.filter(m => m.id !== id));
+  };
+
+  const addElectricityLine = () => {
+    if (!newElecName || !newElecPower) return;
+    const newLine: ElectricityLine = {
+      id: Math.random().toString(36).substring(2, 11),
+      designation: newElecName,
+      powerKw: Number(newElecPower),
+      count: Number(newElecCount),
+      utilizationCoef: Number(newElecUtilCoef),
+      workDaysPerYear: electricityConfig.workDaysPerYear,
+      hoursPerDay: electricityConfig.hoursPerDay
+    };
+    setElectricityLines([...electricityLines, newLine]);
+    setNewElecName('');
+    setNewElecPower('');
+    setNewElecCount('1');
+    setNewElecUtilCoef('0.7');
+  };
+
+  const removeElectricityLine = (id: string) => {
+    setElectricityLines(electricityLines.filter(l => l.id !== id));
+  };
+
+  const addAccessory = () => {
+    if (newAccName.trim() === '' || newAccQty === '' || newAccPrice === '') return;
+    
+    const newItem: AccessoryItem = {
+      id: Math.random().toString(36).substring(2, 11),
+      designation: newAccName,
+      qtyPerYear: Number(newAccQty),
+      unitPrice: Number(newAccPrice),
+      unit: newAccUnit,
+      allocation: newAccAlloc,
+      calculationMode: 'direct'
+    };
+    setAccessoryConfig({
+      ...accessoryConfig,
+      items: [...accessoryConfig.items, newItem]
+    });
+    setNewAccName('');
+    setNewAccQty('');
+    setNewAccPrice('');
+    setNewAccUnit('m');
+    setNewAccAlloc('Common');
+  };
+
+  const removeAccessory = (id: string) => {
+    setAccessoryConfig({
+      ...accessoryConfig,
+      items: accessoryConfig.items.filter(item => item.id !== id)
+    });
+  };
+
+  const updateAccessoryField = (id: string, field: keyof AccessoryItem, value: any) => {
+    setAccessoryConfig(prev => ({
+      ...prev,
+      items: prev.items.map(item => item.id === id ? { ...item, [field]: value } : item)
+    }));
+  };
+
+  const applyDiamondCalculation = () => {
+    const vs = Number(dmVs) || 0;
+    const cfu = Number(dmCfu) || 0;
+    const hj = Number(dmHj) || 0;
+    const ja = Number(dmJa) || 0;
+    const n = Number(dmN) || 0;
+    const qty = vs * cfu * hj * ja * n;
+    setDmQty(qty.toString());
+    setIsDiamondModalOpen(false);
+  };
+
+  const addDiamondAccessory = () => {
+    if (!dmDesignation || !dmQty || !dmUnitPrice) return;
+    const vs = Number(dmVs) || 0;
+    const cfu = Number(dmCfu) || 0;
+    const hj = Number(dmHj) || 0;
+    const ja = Number(dmJa) || 0;
+    const n = Number(dmN) || 0;
+
+    const newItem: AccessoryItem = {
+      id: Math.random().toString(36).substring(2, 11),
+      designation: dmDesignation,
+      qtyPerYear: Number(dmQty),
+      unitPrice: Number(dmUnitPrice),
+      unit: 'm',
+      allocation: dmAlloc,
+      calculationMode: Number(dmVs) > 0 ? 'calculated' : 'direct',
+      vs, cfu, hoursPerDay: hj, daysPerYear: ja, machineCount: n
+    };
+
+    setAccessoryConfig({
+      ...accessoryConfig,
+      items: [...accessoryConfig.items, newItem]
+    });
+    
+    // Reset form after adding
+    setDmQty('0');
+    setDmUnitPrice('0');
+    setDmDesignation('Fil diamanté');
+    setDmAlloc('Common');
   };
 
   const formatCurrency = (n: number) => {
@@ -471,18 +639,36 @@ export default function App() {
 
         <nav className="flex-1 space-y-1">
             <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={18} />} label="Dashboard" />
+            <NavItem active={activeTab === 'prod'} onClick={() => setActiveTab('prod')} icon={<Mountain size={18} />} label="Production" />
             <NavItem active={activeTab === 'invest'} onClick={() => setActiveTab('invest')} icon={<HardDrive size={18} />} label="Investissements" />
             <NavItem active={activeTab === 'hr'} onClick={() => setActiveTab('hr')} icon={<Users size={18} />} label="Ressources Humaines" />
             <NavItem active={activeTab === 'ops'} onClick={() => setActiveTab('ops')} icon={<Fuel size={18} />} label="Carburant & Maint." />
+            <NavItem active={activeTab === 'elec'} onClick={() => setActiveTab('elec')} icon={<Zap size={18} />} label="Électricité" />
+            <NavItem active={activeTab === 'acc'} onClick={() => setActiveTab('acc')} icon={<PlusCircle size={18} />} label="Coûts Accessoires" />
             <NavItem active={activeTab === 'edit'} onClick={() => setActiveTab('edit')} icon={<Edit3 size={18} />} label="Saisie TCR" />
             <NavItem active={activeTab === 'table'} onClick={() => setActiveTab('table')} icon={<TableIcon size={18} />} label="Rapports TCR" />
             <NavItem active={activeTab === 'charts'} onClick={() => setActiveTab('charts')} icon={<Activity size={18} />} label="Analyses Graphiques" />
-            <NavItem active={activeTab === 'history'} onClick={() => setActiveTab('history')} icon={<History size={18} />} label="Historique" />
             <NavItem active={activeTab === 'help'} onClick={() => setActiveTab('help')} icon={<BookOpen size={18} />} label="Aide & Manuel" />
             <NavItem active={activeTab === 'code'} onClick={() => setActiveTab('code')} icon={<Smartphone size={18} />} label="Export Android" />
             <NavItem active={activeTab === 'about'} onClick={() => setActiveTab('about')} icon={<Info size={18} />} label="À propos" />
             
-            <div className="mt-8 px-8">
+            <div className="mt-8 px-8 space-y-3">
+              <button 
+                onClick={handleSave}
+                className="w-full flex items-center gap-3 px-4 py-3 text-[10px] font-black uppercase tracking-[2px] bg-sleek-primary text-white rounded-xl shadow-lg shadow-sleek-primary/20 hover:bg-blue-600 transition-all active:scale-95"
+              >
+                <Check size={16} />
+                Enregistrer
+              </button>
+
+              <button 
+                onClick={handleResetSave}
+                className="w-full flex items-center gap-3 px-4 py-3 text-[10px] font-black uppercase tracking-[2px] text-orange-400 hover:text-white hover:bg-orange-500/20 border border-orange-500/30 rounded-xl transition-all"
+              >
+                <History size={16} />
+                Reset Save
+              </button>
+
               <button 
                 onClick={handleResetData}
                 className="w-full flex items-center gap-3 px-4 py-3 text-[10px] font-black uppercase tracking-[2px] text-red-400 hover:text-white hover:bg-red-500/20 border border-red-500/30 rounded-xl transition-all group"
@@ -503,56 +689,55 @@ export default function App() {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col min-w-0 h-screen">
+      <main className="flex-1 flex flex-col min-w-0 h-screen relative">
+        <AnimatePresence>
+          {saveMessage && (
+            <motion.div 
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="absolute top-4 left-1/2 -translate-x-1/2 z-[100] bg-emerald-500 text-white px-6 py-2 rounded-full shadow-2xl font-bold text-xs tracking-widest flex items-center gap-2"
+            >
+              <Check size={14} />
+              {saveMessage}
+            </motion.div>
+          )}
+        </AnimatePresence>
         {/* Header */}
         <header className="p-8 pb-4 flex items-center justify-between shrink-0">
           <div>
             <h1 className="text-2xl font-bold text-sleek-text-main">
               {activeTab === 'dashboard' && "Tableau de Bord Exécutif"}
+              {activeTab === 'prod' && "Dimensionnement de la Production"}
               {activeTab === 'invest' && "Module Investissements & Amortissements"}
               {activeTab === 'hr' && "Gestion des Frais de Personnel"}
               {activeTab === 'ops' && "Calculateur Fuel & Maintenance"}
+              {activeTab === 'elec' && "Électricité (Groupes électrogènes)"}
+              {activeTab === 'acc' && "Gestion des Coûts Accessoires"}
               {activeTab === 'edit' && "Prévisions d'Exploitation"}
               {activeTab === 'table' && "Analyse des Comptes des Résultats"}
               {activeTab === 'charts' && "Visualisation Graphique du TCR"}
-              {activeTab === 'history' && "Historique des Simulations"}
               {activeTab === 'code' && "Code Source Android (MVVM)"}
               {activeTab === 'help' && "Centre d'Aide & Documentation"}
               {activeTab === 'about' && "À propos du Concepteur"}
             </h1>
             <p className="text-sm text-sleek-text-muted mt-1">
               {activeTab === 'dashboard' && "Vue d'ensemble de la performance et de la rentabilité du projet."}
+              {activeTab === 'prod' && "Planification des volumes et calcul des besoins en machines."}
               {activeTab === 'invest' && "Gestion des équipements et calcul automatique des annuités."}
               {activeTab === 'hr' && "Calcul automatique des charges sociales et projection sur 10 ans."}
               {activeTab === 'ops' && "Pilotage dynamique des consommations et entretien des engins."}
+              {activeTab === 'elec' && "Dimensionnement et consommation diesel des groupes autonomes."}
+              {activeTab === 'acc' && "Gestion extensible des intrants et consommables divers."}
               {activeTab === 'edit' && "Liaison dynamique totale activée (Amort., RH, Fuel, Maint.)."}
               {activeTab === 'table' && "Analyse consolidée du projet sur 10 ans."}
               {activeTab === 'charts' && "Graphiques interactifs des indicateurs de performance."}
-              {activeTab === 'history' && "Journal des modifications et versions précédentes du TCR."}
               {activeTab === 'help' && "Guide complet des calculs et manuel d'utilisation de l'application."}
               {activeTab === 'about' && "Informations professionnelles sur le développeur de l'application."}
             </p>
           </div>
 
           <div className="flex items-center gap-4">
-             <div className="flex items-center gap-2 mr-2">
-               <button 
-                 onClick={undo}
-                 disabled={historyIndex <= 0}
-                 className="p-3 bg-white border border-sleek-border rounded-xl shadow-sm text-sleek-text-main hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-                 title="Annuler (Undo)"
-               >
-                 <Undo2 size={18} />
-               </button>
-               <button 
-                 onClick={redo}
-                 disabled={historyIndex >= history.length - 1}
-                 className="p-3 bg-white border border-sleek-border rounded-xl shadow-sm text-sleek-text-main hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-                 title="Rétablir (Redo)"
-               >
-                 <Redo2 size={18} />
-               </button>
-             </div>
              <div className="flex flex-col items-end bg-white px-4 py-2 rounded-xl border border-sleek-border shadow-sm">
                 <span className="text-[10px] uppercase font-bold text-sleek-text-muted">Investissement Total (DA)</span>
                 <span className="text-lg font-extrabold text-sleek-primary">{formatCurrency(totalInvestment)} DA</span>
@@ -690,6 +875,496 @@ export default function App() {
               </motion.div>
             )}
 
+            {activeTab === 'prod' && (
+              <motion.div 
+                key="prod" 
+                initial={{ opacity: 0, y: 15 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                exit={{ opacity: 0, scale: 0.98 }} 
+                transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }} 
+                className="flex-1 flex flex-col gap-8 overflow-y-auto pr-2 custom-scrollbar"
+              >
+                {/* Header Information */}
+                <div className="bg-gradient-to-r from-sleek-primary to-blue-600 rounded-[2.5rem] p-10 text-white shadow-2xl relative overflow-hidden shrink-0">
+                  <div className="absolute top-0 right-0 p-12 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <Mountain size={160} strokeWidth={1} />
+                  </div>
+                  <div className="relative z-10">
+                    <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-white/10 rounded-full text-[10px] font-bold uppercase tracking-wider mb-6 backdrop-blur-md border border-white/10">
+                       <Activity size={12} /> Outil de Simulation & Dimensionnement
+                    </div>
+                    <h2 className="text-3xl font-black tracking-tight mb-4 leading-tight">Objectif de Production & Planning</h2>
+                    <p className="text-white/70 max-w-2xl font-medium leading-relaxed">
+                      Espace dédié au dimensionnement des capacités d'extraction et de retaille. Déterminez le volume en amont (Tout-Venant) nécessaire pour atteindre vos objectifs de blocs marchands en tenant compte des rendements.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                  {/* Left Column: Configuration */}
+                  <div className="lg:col-span-4 space-y-8">
+                    {/* Section 1: Paramètres de Base */}
+                    <div className="bg-white p-8 rounded-[2rem] border border-sleek-border shadow-md space-y-6">
+                      <h3 className="text-sm font-bold text-sleek-text-main flex items-center gap-2 border-b border-slate-50 pb-4 uppercase tracking-tighter">
+                        <Settings size={16} className="text-sleek-primary" /> 1. Paramètres de Base
+                      </h3>
+                      
+                      <div className="space-y-4">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-70 px-1">Matériau Concerné</label>
+                          <select className="w-full bg-slate-50 border border-sleek-border rounded-xl px-4 py-3 text-sm font-semibold transition-all outline-none focus:ring-2 focus:ring-sleek-primary/10" disabled>
+                            <option value="Granite">Granite (uniquement)</option>
+                          </select>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-70 px-1">Horizon d'étude</label>
+                            <select 
+                              value={productionConfig.horizon}
+                              onChange={(e) => setProductionConfig({...productionConfig, horizon: e.target.value as any})}
+                              className="w-full bg-slate-50 border border-sleek-border rounded-xl px-4 py-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-sleek-primary/10"
+                            >
+                              <option value="1y">1 An (Statique)</option>
+                              <option value="10y">10 Ans (Dynamique)</option>
+                            </select>
+                          </div>
+                          
+                          {productionConfig.horizon === '10y' && (
+                            <div className="space-y-1.5">
+                              <label className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-70 px-1">Mode Volume Cible</label>
+                              <select 
+                                value={productionConfig.targetMode}
+                                onChange={(e) => setProductionConfig({...productionConfig, targetMode: e.target.value as any})}
+                                className="w-full bg-slate-50 border border-sleek-border rounded-xl px-4 py-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-sleek-primary/10"
+                              >
+                                <option value="constant">Constant</option>
+                                <option value="variable">Variable / an</option>
+                              </select>
+                            </div>
+                          )}
+                        </div>
+
+                        <InputGroupVertical 
+                          label="Volume annuel cible Vcible (m³/an)"
+                          value={productionConfig.vTargetConstant.toString()}
+                          onChange={(v) => setProductionConfig({...productionConfig, vTargetConstant: Number(v)})}
+                          type="number"
+                          helper="Volume final de blocs marchands à produire par an"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Section 2: Chaîne de production */}
+                    <div className="bg-white p-8 rounded-[2rem] border border-sleek-border shadow-md space-y-6">
+                      <h3 className="text-sm font-bold text-sleek-text-main flex items-center gap-2 border-b border-slate-50 pb-4 uppercase tracking-tighter">
+                        <Activity size={16} className="text-sleek-primary" /> 2. Dimensions des Blocs
+                      </h3>
+                      
+                      <div className="space-y-6">
+                        {/* Step A: Extraction */}
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-black uppercase text-sleek-primary bg-blue-50 px-3 py-1 rounded-full tracking-widest">Étape A : Extraction</span>
+                            <span className="text-[11px] font-mono font-bold text-slate-400">
+                              Vgros = {(productionConfig.steps.extraction.dimensions.l * productionConfig.steps.extraction.dimensions.w * productionConfig.steps.extraction.dimensions.h).toFixed(2)} m³
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-3">
+                            <InputGroupVertical 
+                              label="L (m)" value={productionConfig.steps.extraction.dimensions.l.toString()} 
+                              onChange={(v) => {
+                                const newConfig = {...productionConfig};
+                                newConfig.steps.extraction.dimensions.l = Number(v);
+                                setProductionConfig(newConfig);
+                              }}
+                              type="number"
+                            />
+                            <InputGroupVertical 
+                              label="l (m)" value={productionConfig.steps.extraction.dimensions.w.toString()} 
+                              onChange={(v) => {
+                                const newConfig = {...productionConfig};
+                                newConfig.steps.extraction.dimensions.w = Number(v);
+                                setProductionConfig(newConfig);
+                              }}
+                              type="number"
+                            />
+                            <InputGroupVertical 
+                              label="h (m)" value={productionConfig.steps.extraction.dimensions.h.toString()} 
+                              onChange={(v) => {
+                                const newConfig = {...productionConfig};
+                                newConfig.steps.extraction.dimensions.h = Number(v);
+                                setProductionConfig(newConfig);
+                              }}
+                              type="number"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Step B: Retaille */}
+                        <div className="space-y-4 pt-4 border-t border-slate-50">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-black uppercase text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full tracking-widest">Étape B : Retaille</span>
+                            <span className="text-[11px] font-mono font-bold text-slate-400">
+                              Vretaille = {(productionConfig.steps.retaille.dimensions.l * productionConfig.steps.retaille.dimensions.w * productionConfig.steps.retaille.dimensions.h).toFixed(3)} m³
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-3">
+                            <InputGroupVertical 
+                              label="L (m)" value={productionConfig.steps.retaille.dimensions.l.toString()} 
+                              onChange={(v) => {
+                                const newConfig = {...productionConfig};
+                                newConfig.steps.retaille.dimensions.l = Number(v);
+                                setProductionConfig(newConfig);
+                              }}
+                              type="number"
+                            />
+                            <InputGroupVertical 
+                              label="l (m)" value={productionConfig.steps.retaille.dimensions.w.toString()} 
+                              onChange={(v) => {
+                                const newConfig = {...productionConfig};
+                                newConfig.steps.retaille.dimensions.w = Number(v);
+                                setProductionConfig(newConfig);
+                              }}
+                              type="number"
+                            />
+                            <InputGroupVertical 
+                              label="h (m)" value={productionConfig.steps.retaille.dimensions.h.toString()} 
+                              onChange={(v) => {
+                                const newConfig = {...productionConfig};
+                                newConfig.steps.retaille.dimensions.h = Number(v);
+                                setProductionConfig(newConfig);
+                              }}
+                              type="number"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Middle and Right Column: Rendements & Capacités */}
+                  <div className="lg:col-span-8 space-y-8">
+                    {/* Section 3: Rendements */}
+                    <div className="bg-white p-8 rounded-[2rem] border border-sleek-border shadow-md">
+                      <h3 className="text-sm font-bold text-sleek-text-main flex items-center gap-2 border-b border-slate-50 pb-4 uppercase tracking-tighter mb-6">
+                        <TrendingUp size={16} className="text-emerald-500" /> 3. Rendements & Pertes
+                      </h3>
+
+                      {productionConfig.horizon === '1y' ? (
+                        <div className="grid grid-cols-2 gap-8">
+                          <div className="space-y-4">
+                            <label className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">η1 : Rendement Extraction</label>
+                            <div className="flex items-center gap-4">
+                              <input 
+                                type="range" min="0" max="1" step="0.05"
+                                value={productionConfig.yieldsConstant.eta1}
+                                onChange={(e) => setProductionConfig({...productionConfig, yieldsConstant: {...productionConfig.yieldsConstant, eta1: Number(e.target.value)}})}
+                                className="flex-1 accent-sleek-primary"
+                              />
+                              <span className="text-lg font-mono font-black text-sleek-primary w-16 text-right">{(productionConfig.yieldsConstant.eta1 * 100).toFixed(0)}%</span>
+                            </div>
+                          </div>
+                          <div className="space-y-4">
+                            <label className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">η2 : Rendement Retaille</label>
+                            <div className="flex items-center gap-4">
+                              <input 
+                                type="range" min="0" max="1" step="0.05"
+                                value={productionConfig.yieldsConstant.eta2}
+                                onChange={(e) => setProductionConfig({...productionConfig, yieldsConstant: {...productionConfig.yieldsConstant, eta2: Number(e.target.value)}})}
+                                className="flex-1 accent-indigo-500"
+                              />
+                              <span className="text-lg font-mono font-black text-indigo-500 w-16 text-right">{(productionConfig.yieldsConstant.eta2 * 100).toFixed(0)}%</span>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto pb-4">
+                          <table className="w-full text-left text-xs border-separate border-spacing-x-2">
+                             <thead>
+                               <tr className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                 <th className="p-2">Année</th>
+                                 {Array.from({length: 10}).map((_, i) => <th key={i} className="text-center">A{i+1}</th>)}
+                               </tr>
+                             </thead>
+                             <tbody className="divide-y divide-slate-50">
+                               <tr>
+                                 <td className="p-2 font-bold text-sleek-primary whitespace-nowrap">Vcible (m³)</td>
+                                 {Array.from({length: 10}).map((_, i) => (
+                                   <td key={i} className="p-1">
+                                     <input 
+                                       type="number"
+                                       value={productionConfig.targetMode === 'constant' ? productionConfig.vTargetConstant : productionConfig.vTargetVariable[i]}
+                                       onChange={(e) => {
+                                         if (productionConfig.targetMode === 'constant') {
+                                           setProductionConfig({...productionConfig, vTargetConstant: Number(e.target.value)});
+                                         } else {
+                                           const newVar = [...productionConfig.vTargetVariable];
+                                           newVar[i] = Number(e.target.value);
+                                           setProductionConfig({...productionConfig, vTargetVariable: newVar});
+                                         }
+                                       }}
+                                       className="w-full bg-slate-50 border border-slate-100 rounded-lg p-1.5 text-center font-mono font-bold outline-none focus:bg-white focus:border-sleek-primary"
+                                     />
+                                   </td>
+                                 ))}
+                               </tr>
+                               <tr>
+                                 <td className="p-2 font-bold text-emerald-600 whitespace-nowrap">η1 (Extrac.)</td>
+                                 {Array.from({length: 10}).map((_, i) => (
+                                   <td key={i} className="p-1">
+                                     <input 
+                                       type="number" step="0.01"
+                                       value={productionConfig.yieldsVariable.eta1[i]}
+                                       onChange={(e) => {
+                                         const newVar = [...productionConfig.yieldsVariable.eta1];
+                                         newVar[i] = Number(e.target.value);
+                                         setProductionConfig({...productionConfig, yieldsVariable: {...productionConfig.yieldsVariable, eta1: newVar}});
+                                       }}
+                                       className="w-full bg-emerald-50/50 border border-emerald-100 rounded-lg p-1.5 text-center font-mono font-bold outline-none focus:bg-white focus:border-emerald-500"
+                                     />
+                                   </td>
+                                 ))}
+                               </tr>
+                               <tr>
+                                 <td className="p-2 font-bold text-indigo-600 whitespace-nowrap">η2 (Retail.)</td>
+                                 {Array.from({length: 10}).map((_, i) => (
+                                   <td key={i} className="p-1">
+                                     <input 
+                                       type="number" step="0.01"
+                                       value={productionConfig.yieldsVariable.eta2[i]}
+                                       onChange={(e) => {
+                                         const newVar = [...productionConfig.yieldsVariable.eta2];
+                                         newVar[i] = Number(e.target.value);
+                                         setProductionConfig({...productionConfig, yieldsVariable: {...productionConfig.yieldsVariable, eta2: newVar}});
+                                       }}
+                                       className="w-full bg-indigo-50/50 border border-indigo-100 rounded-lg p-1.5 text-center font-mono font-bold outline-none focus:bg-white focus:border-indigo-500"
+                                     />
+                                   </td>
+                                 ))}
+                               </tr>
+                             </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Section 4: Capacités Machines */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                      {/* Extraction Machine */}
+                      <div className="bg-white p-8 rounded-[2rem] border border-sleek-border shadow-md space-y-6">
+                        <h3 className="text-sm font-bold text-sleek-text-main flex items-center gap-2 border-b border-slate-50 pb-4 uppercase tracking-tighter">
+                          <HardHat size={16} className="text-sleek-primary" /> Capacité Extraction
+                        </h3>
+                        <div className="grid grid-cols-2 gap-4">
+                           <InputGroupVertical label="Vs (m²/h)" value={productionConfig.steps.extraction.productivity.vs.toString()} onChange={(v) => {
+                             const newConfig = {...productionConfig};
+                             newConfig.steps.extraction.productivity.vs = Number(v);
+                             setProductionConfig(newConfig);
+                           }} type="number" />
+                           <InputGroupVertical label="h_eq (m)" value={productionConfig.steps.extraction.productivity.hEq.toString()} onChange={(v) => {
+                             const newConfig = {...productionConfig};
+                             newConfig.steps.extraction.productivity.hEq = Number(v);
+                             setProductionConfig(newConfig);
+                           }} type="number" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                           <InputGroupVertical label="H (h/j)" value={productionConfig.steps.extraction.productivity.hoursPerDay.toString()} onChange={(v) => {
+                             const newConfig = {...productionConfig};
+                             newConfig.steps.extraction.productivity.hoursPerDay = Number(v);
+                             setProductionConfig(newConfig);
+                           }} type="number" />
+                           <InputGroupVertical label="J (j/an)" value={productionConfig.steps.extraction.productivity.daysPerYear.toString()} onChange={(v) => {
+                             const newConfig = {...productionConfig};
+                             newConfig.steps.extraction.productivity.daysPerYear = Number(v);
+                             setProductionConfig(newConfig);
+                           }} type="number" />
+                        </div>
+                        <InputGroupVertical label="Taux d'Utilisation U" value={productionConfig.steps.extraction.productivity.utilizationRate.toString()} onChange={(v) => {
+                          const newConfig = {...productionConfig};
+                          newConfig.steps.extraction.productivity.utilizationRate = Number(v);
+                          setProductionConfig(newConfig);
+                        }} type="number" helper="Valeur entre 0 et 1 (Défaut 1)" />
+                      </div>
+
+                      {/* Retaille Machine */}
+                      <div className="bg-white p-8 rounded-[2rem] border border-sleek-border shadow-md space-y-6">
+                        <h3 className="text-sm font-bold text-sleek-text-main flex items-center gap-2 border-b border-slate-50 pb-4 uppercase tracking-tighter">
+                          <Settings size={16} className="text-indigo-600" /> Capacité Retaille
+                        </h3>
+                        <div className="grid grid-cols-2 gap-4">
+                           <InputGroupVertical label="Vs (m²/h)" value={productionConfig.steps.retaille.productivity.vs.toString()} onChange={(v) => {
+                             const newConfig = {...productionConfig};
+                             newConfig.steps.retaille.productivity.vs = Number(v);
+                             setProductionConfig(newConfig);
+                           }} type="number" />
+                           <InputGroupVertical label="h_eq (m)" value={productionConfig.steps.retaille.productivity.hEq.toString()} onChange={(v) => {
+                             const newConfig = {...productionConfig};
+                             newConfig.steps.retaille.productivity.hEq = Number(v);
+                             setProductionConfig(newConfig);
+                           }} type="number" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                           <InputGroupVertical label="H (h/j)" value={productionConfig.steps.retaille.productivity.hoursPerDay.toString()} onChange={(v) => {
+                             const newConfig = {...productionConfig};
+                             newConfig.steps.retaille.productivity.hoursPerDay = Number(v);
+                             setProductionConfig(newConfig);
+                           }} type="number" />
+                           <InputGroupVertical label="J (j/an)" value={productionConfig.steps.retaille.productivity.daysPerYear.toString()} onChange={(v) => {
+                             const newConfig = {...productionConfig};
+                             newConfig.steps.retaille.productivity.daysPerYear = Number(v);
+                             setProductionConfig(newConfig);
+                           }} type="number" />
+                        </div>
+                        <InputGroupVertical label="Taux d'Utilisation U" value={productionConfig.steps.retaille.productivity.utilizationRate.toString()} onChange={(v) => {
+                          const newConfig = {...productionConfig};
+                          newConfig.steps.retaille.productivity.utilizationRate = Number(v);
+                          setProductionConfig(newConfig);
+                        }} type="number" helper="Valeur entre 0 et 1 (Défaut 1)" />
+                      </div>
+                    </div>
+
+                    {/* Section 5: Résultats */}
+                    <div className="bg-slate-900 rounded-[2.5rem] p-10 text-white shadow-2xl space-y-8">
+                       <div className="flex items-center justify-between border-b border-white/10 pb-6">
+                         <h3 className="text-xl font-black flex items-center gap-3">
+                           <LayoutDashboard size={24} className="text-sleek-primary" /> Résultats du Dimensionnement
+                         </h3>
+                         <div className="text-[10px] font-black uppercase text-white/50 tracking-[0.3em]">Synthèse Technique</div>
+                       </div>
+
+                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                         {(() => {
+                           // Quick Calc for first year for KPI display
+                           const vTarget = productionConfig.horizon === '1y' ? productionConfig.vTargetConstant : (productionConfig.targetMode === 'constant' ? productionConfig.vTargetConstant : productionConfig.vTargetVariable[0]);
+                           const eta1 = productionConfig.horizon === '1y' ? productionConfig.yieldsConstant.eta1 : productionConfig.yieldsVariable.eta1[0];
+                           const eta2 = productionConfig.horizon === '1y' ? productionConfig.yieldsConstant.eta2 : productionConfig.yieldsVariable.eta2[0];
+                           const etaTot = eta1 * eta2;
+                           const vAmont = vTarget / (etaTot || 1);
+                           
+                           const vgros = productionConfig.steps.extraction.dimensions.l * productionConfig.steps.extraction.dimensions.w * productionConfig.steps.extraction.dimensions.h;
+                           const vretaille = productionConfig.steps.retaille.dimensions.l * productionConfig.steps.retaille.dimensions.w * productionConfig.steps.retaille.dimensions.h;
+                           
+                           const capA = productionConfig.steps.extraction.productivity.vs * productionConfig.steps.extraction.productivity.hEq * productionConfig.steps.extraction.productivity.hoursPerDay * productionConfig.steps.extraction.productivity.daysPerYear * productionConfig.steps.extraction.productivity.utilizationRate;
+                           const capB = productionConfig.steps.retaille.productivity.vs * productionConfig.steps.retaille.productivity.hEq * productionConfig.steps.retaille.productivity.hoursPerDay * productionConfig.steps.retaille.productivity.daysPerYear * productionConfig.steps.retaille.productivity.utilizationRate;
+                           
+                           const na = Math.ceil(vAmont / (capA || 1));
+                           const nb = Math.ceil(vTarget / (capB || 1));
+
+                           return (
+                             <>
+                               <div className="bg-white/5 p-6 rounded-3xl border border-white/10 flex flex-col gap-2">
+                                  <span className="text-[9px] font-black uppercase text-white/40 tracking-widest leading-none">V_amont Tout-Venant</span>
+                                  <span className="text-2xl font-mono font-black text-sleek-primary">{vAmont.toLocaleString('fr-DZ', {maximumFractionDigits: 0})} <span className="text-xs font-sans opacity-40">m³/an</span></span>
+                                  <p className="text-[9px] text-white/30 italic">Volume à extraire pour compenser les pertes</p>
+                               </div>
+                               <div className="bg-white/5 p-6 rounded-3xl border border-white/10 flex flex-col gap-2">
+                                  <span className="text-[9px] font-black uppercase text-white/40 tracking-widest leading-none">Nb Machines Requises</span>
+                                  <div className="flex flex-col gap-1">
+                                    <span className="text-2xl font-mono font-black text-emerald-400">{na} <span className="text-[10px] font-sans opacity-40 uppercase">Extraction</span></span>
+                                    <span className="text-2xl font-mono font-black text-indigo-400">{nb} <span className="text-[10px] font-sans opacity-40 uppercase">Retaille</span></span>
+                                  </div>
+                               </div>
+                               <div className="bg-white/5 p-6 rounded-3xl border border-white/10 flex flex-col gap-2">
+                                  <span className="text-[9px] font-black uppercase text-white/40 tracking-widest leading-none">Logistique Annuelle</span>
+                                  <div className="flex flex-col gap-1">
+                                    <span className="text-sm font-bold text-white"><span className="text-blue-400">{Math.ceil(vAmont/vgros)}</span> Gros blocs</span>
+                                    <span className="text-sm font-bold text-white"><span className="text-indigo-400">{Math.ceil(vTarget/vretaille)}</span> Blocs retaille</span>
+                                  </div>
+                               </div>
+                               <div className="bg-white/5 p-6 rounded-3xl border border-white/10 flex flex-col gap-2 shadow-inner">
+                                  <span className="text-[9px] font-black uppercase text-white/40 tracking-widest leading-none">Analyse Critique</span>
+                                  <div className="flex flex-col gap-1">
+                                    <span className="text-sm font-bold text-white flex items-center gap-2">
+                                       Bottleneck: <span className={na >= nb ? "text-emerald-400" : "text-indigo-400"}>{na >= nb ? "Extraction" : "Retaille"}</span>
+                                    </span>
+                                    <span className="text-sm font-bold text-white flex items-center gap-2">
+                                       Nmax: <span className="text-sleek-primary">{Math.max(na, nb)} machines</span>
+                                    </span>
+                                  </div>
+                               </div>
+                             </>
+                           );
+                         })()}
+                       </div>
+
+                       {/* 10 Year Result Table */}
+                       {productionConfig.horizon === '10y' && (
+                         <div className="mt-8 overflow-x-auto rounded-2xl border border-white/5">
+                            <table className="w-full text-[10px] border-collapse min-w-[900px]">
+                               <thead>
+                                 <tr className="bg-white/10 text-white/60 font-black uppercase tracking-widest">
+                                   <th className="p-4 text-left border-b border-white/5">Indicateurs / Année</th>
+                                   {Array.from({length: 10}).map((_, i) => <th key={i} className="p-4 border-b border-white/5">A{i+1}</th>)}
+                                 </tr>
+                               </thead>
+                               <tbody>
+                                 {(() => {
+                                   const indicators = [];
+                                   const vTargetRef = productionConfig.targetMode === 'constant' ? Array(10).fill(productionConfig.vTargetConstant) : productionConfig.vTargetVariable;
+                                   const eta1Ref = productionConfig.yieldsVariable.eta1;
+                                   const eta2Ref = productionConfig.yieldsVariable.eta2;
+                                   const vgros = productionConfig.steps.extraction.dimensions.l * productionConfig.steps.extraction.dimensions.w * productionConfig.steps.extraction.dimensions.h;
+                                   const vretaille = productionConfig.steps.retaille.dimensions.l * productionConfig.steps.retaille.dimensions.w * productionConfig.steps.retaille.dimensions.h;
+                                   const capA = productionConfig.steps.extraction.productivity.vs * productionConfig.steps.extraction.productivity.hEq * productionConfig.steps.extraction.productivity.hoursPerDay * productionConfig.steps.extraction.productivity.daysPerYear * productionConfig.steps.extraction.productivity.utilizationRate;
+                                   const capB = productionConfig.steps.retaille.productivity.vs * productionConfig.steps.retaille.productivity.hEq * productionConfig.steps.retaille.productivity.hoursPerDay * productionConfig.steps.retaille.productivity.daysPerYear * productionConfig.steps.retaille.productivity.utilizationRate;
+
+                                   const rowVAmont = Array.from({length: 10}, (_, i) => vTargetRef[i] / ((eta1Ref[i] * eta2Ref[i]) || 1));
+                                   const rowNbGros = rowVAmont.map(v => Math.ceil(v/vgros));
+                                   const rowNbRetaille = vTargetRef.map(v => Math.ceil(v/vretaille));
+                                   const rowNa = rowVAmont.map(v => Math.ceil(v/capA));
+                                   const rowNb = vTargetRef.map(v => Math.ceil(v/capB));
+
+                                   return (
+                                     <>
+                                       <tr className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                                         <td className="p-4 font-bold text-white/70">V_amont (m³/an)</td>
+                                         {rowVAmont.map((v, i) => <td key={i} className="p-4 text-center font-mono">{v.toLocaleString('fr-DZ', {maximumFractionDigits: 0})}</td>)}
+                                       </tr>
+                                       <tr className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                                         <td className="p-4 font-bold text-white/70">Nb Gros blocs</td>
+                                         {rowNbGros.map((v, i) => <td key={i} className="p-4 text-center font-mono">{v}</td>)}
+                                       </tr>
+                                       <tr className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                                         <td className="p-4 font-bold text-white/70">Nb Blocs Retaille</td>
+                                         {rowNbRetaille.map((v, i) => <td key={i} className="p-4 text-center font-mono">{v}</td>)}
+                                       </tr>
+                                       <tr className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                                         <td className="p-4 font-bold text-emerald-400">Machines Extraction (N_A)</td>
+                                         {rowNa.map((v, i) => <td key={i} className="p-4 text-center font-mono font-black text-emerald-400">{v}</td>)}
+                                       </tr>
+                                       <tr className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                                         <td className="p-4 font-bold text-indigo-400">Machines Retaille (N_B)</td>
+                                         {rowNb.map((v, i) => <td key={i} className="p-4 text-center font-mono font-black text-indigo-400">{v}</td>)}
+                                       </tr>
+                                     </>
+                                   );
+                                 })()}
+                               </tbody>
+                            </table>
+                         </div>
+                       )}
+
+                       <div className="pt-8 border-t border-white/10 flex items-center justify-between text-white/40">
+                          <div className="flex items-center gap-3">
+                             <div className="w-8 h-8 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center"><Info size={14}/></div>
+                             <p className="text-[10px] font-medium max-w-lg leading-relaxed">
+                               Les calculs sont théoriques et basés sur des rendements idéaux. Un coefficient de sécurité peut être ajouté via le taux d'utilisation U.
+                             </p>
+                          </div>
+                          <button 
+                            className="px-6 py-3 bg-white/10 hover:bg-white/20 rounded-xl text-xs font-bold text-white transition-all backdrop-blur-md opacity-30 cursor-not-allowed border border-white/5"
+                            title="Indisponible pour l'instant"
+                          >
+                             Appliquer au TCR (Bêta)
+                          </button>
+                       </div>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
             {activeTab === 'invest' && (
               <motion.div 
                 key="invest" 
@@ -697,10 +1372,10 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }} 
                 exit={{ opacity: 0, scale: 0.98 }} 
                 transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-                className="h-full flex flex-col gap-6"
+                className="flex-1 flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar min-h-0"
               >
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 shrink-0">
-                  <div className="lg:col-span-4 bg-white p-6 rounded-2xl border border-sleek-border shadow-md">
+                  <div className="lg:col-span-4 bg-white p-6 rounded-2xl border border-sleek-border shadow-md overflow-y-auto max-h-[calc(100vh-220px)] custom-scrollbar">
                     <h3 className="text-sm font-bold mb-4 flex items-center gap-2 text-sleek-text-main"><PlusCircle size={16} className="text-sleek-primary"/> Nouvel Équipement</h3>
                     <div className="space-y-4">
                       <InputGroupVertical label="Désignation" value={newEqName} onChange={setNewEqName} />
@@ -734,7 +1409,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="lg:col-span-8 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col max-h-[440px]">
+                  <div className="lg:col-span-8 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col max-h-[calc(100vh-220px)]">
                     <div className="px-6 py-4 border-b border-sleek-border bg-slate-50 flex justify-between items-center">
                       <h3 className="text-xs font-bold text-sleek-text-muted uppercase tracking-widest">Récapitulatif des Investissements</h3>
                       <span className="bg-sleek-primary/10 text-sleek-primary px-3 py-1 rounded-full text-[10px] font-bold">Total: {formatCurrency(totalInvestment)}</span>
@@ -794,7 +1469,8 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex-1 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col">
+                {/* Section Amortissements */}
+                <div className="flex-1 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col min-h-[400px]">
                    <div className="px-6 py-4 border-b border-sleek-border flex items-center justify-between bg-slate-50">
                       <h3 className="text-xs font-bold uppercase tracking-widest text-sleek-text-muted flex items-center gap-2">
                         <TrendingDown size={14} className="text-sleek-accent-red"/> Tableau 02. Amortissements Annuels
@@ -852,10 +1528,10 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }} 
                 exit={{ opacity: 0, scale: 0.98 }} 
                 transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-                className="h-full flex flex-col gap-6"
+                className="flex-1 flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar min-h-0"
               >
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 shrink-0">
-                  <div className="lg:col-span-4 bg-white p-6 rounded-2xl border border-sleek-border shadow-md">
+                  <div className="lg:col-span-4 bg-white p-6 rounded-2xl border border-sleek-border shadow-md overflow-y-auto max-h-[calc(100vh-220px)] custom-scrollbar">
                     <h3 className="text-sm font-bold mb-4 flex items-center gap-2 text-sleek-text-main"><UsersRound size={16} className="text-sleek-primary"/> Nouveau Poste</h3>
                     <div className="space-y-4">
                       <InputGroupVertical label="Désignation du Poste" value={newRoleName} onChange={setNewRoleName} />
@@ -878,15 +1554,25 @@ export default function App() {
                       <div className="pt-4 border-t border-slate-100 space-y-4">
                         <h4 className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-60">Paramètres de Masse Salariale</h4>
                         <div className="grid grid-cols-2 gap-4">
-                           <InputGroupVertical label="Charges Soc. (%)" value={(hrConfig.socialChargesRate * 100).toString()} onChange={v => setHrConfig({...hrConfig, socialChargesRate: Number(v)/100})} type="number" />
-                           <InputGroupVertical label="Inflation (%)" value={(hrConfig.annualIncreaseRate * 100).toString()} onChange={v => setHrConfig({...hrConfig, annualIncreaseRate: Number(v)/100})} type="number" />
+                           <InputGroupVertical 
+                             label="Charges Soc. (%)" 
+                             value={((hrConfig.socialChargesRate ?? 0) * 100).toString()} 
+                             onChange={v => setHrConfig({...hrConfig, socialChargesRate: Number(v)/100})} 
+                             type="number" 
+                           />
+                           <InputGroupVertical 
+                             label="Inflation (%)" 
+                             value={((hrConfig.annualIncreaseRate ?? 0) * 100).toString()} 
+                             onChange={v => setHrConfig({...hrConfig, annualIncreaseRate: Number(v)/100})} 
+                             type="number" 
+                           />
                         </div>
                       </div>
                       <button onClick={addRole} className="w-full py-3 bg-sleek-primary text-white rounded-xl font-bold text-sm tracking-wide mt-2 shadow-lg shadow-sleek-primary/10">Ajouter l'Effectif</button>
                     </div>
                   </div>
 
-                  <div className="lg:col-span-8 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col max-h-[400px]">
+                  <div className="lg:col-span-8 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col max-h-[calc(100vh-220px)]">
                     <div className="px-6 py-4 border-b border-sleek-border bg-slate-50 flex justify-between items-center">
                       <h3 className="text-xs font-bold text-sleek-text-muted uppercase tracking-widest">Tableau RH. Liste du Personnel</h3>
                       <span className="bg-sleek-primary/10 text-sleek-primary px-3 py-1 rounded-full text-[10px] font-bold">{roles.length} Catégories</span>
@@ -926,7 +1612,8 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex-1 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col">
+                {/* Section Masse Salariale */}
+                <div className="flex-1 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col min-h-[300px]">
                    <div className="px-6 py-4 border-b border-sleek-border bg-slate-50 flex items-center justify-between">
                       <h3 className="text-xs font-bold uppercase tracking-widest text-sleek-text-muted">Projection de la Masse Salariale sur 10 ans</h3>
                       <div className="text-[10px] font-bold text-sleek-primary bg-blue-50 px-3 py-1 rounded-full uppercase tracking-widest">Injection Directe TCR</div>
@@ -955,38 +1642,55 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }} 
                 exit={{ opacity: 0, scale: 0.98 }} 
                 transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-                className="h-full flex flex-col gap-6"
+                className="flex-1 flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar min-h-0"
               >
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 shrink-0">
-                  <div className="lg:col-span-4 bg-white p-6 rounded-2xl border border-sleek-border shadow-md">
-                    <h3 className="text-sm font-bold mb-4 flex items-center gap-2 text-sleek-text-main"><Settings size={16} className="text-sleek-primary"/> Paramètres d'Exploitation</h3>
+                  <div className="lg:col-span-4 bg-white p-6 rounded-2xl border border-sleek-border shadow-md overflow-y-auto max-h-[calc(100vh-220px)] custom-scrollbar">
+                    <h3 className="text-sm font-bold mb-4 flex items-center gap-2 text-sleek-text-main"><Fuel size={16} className="text-sleek-primary"/> Calculateur de Carburant</h3>
                     <div className="space-y-4">
-                      <InputGroupVertical label="Prix du Litre (DA)" value={opConfig.fuelPrice.toString()} onChange={v => setOpConfig({...opConfig, fuelPrice: Number(v)})} type="number" />
-                      <div className="grid grid-cols-2 gap-4">
-                        <InputGroupVertical label="Jours/An" value={opConfig.workDaysPerYear.toString()} onChange={v => setOpConfig({...opConfig, workDaysPerYear: Number(v)})} type="number" />
-                        <InputGroupVertical label="Inflation (%)" value={opConfig.annualInflationRate.toString()} onChange={v => setOpConfig({...opConfig, annualInflationRate: Number(v)})} type="number" />
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-4">
+                        <InputGroupVertical 
+                          label="Prix du Litre (DA/L)" 
+                          value={(opConfig.fuelPrice ?? 0).toString()} 
+                          onChange={v => setOpConfig({...opConfig, fuelPrice: Number(v)})} 
+                          type="number" 
+                        />
+                        <div className="grid grid-cols-2 gap-4">
+                          <InputGroupVertical 
+                            label="Heures/Jour (Défaut)" 
+                            value={(opConfig.hoursPerDay ?? 0).toString()} 
+                            onChange={v => setOpConfig({...opConfig, hoursPerDay: Number(v)})} 
+                            type="number" 
+                          />
+                          <InputGroupVertical 
+                            label="Jours/An (Défaut)" 
+                            value={(opConfig.workDaysPerYear ?? 0).toString()} 
+                            onChange={v => setOpConfig({...opConfig, workDaysPerYear: Number(v)})} 
+                            type="number" 
+                          />
+                        </div>
+                        <InputGroupVertical 
+                          label="Inflation Annuelle (%)" 
+                          value={(opConfig.annualInflationRate ?? 0).toString()} 
+                          onChange={v => setOpConfig({...opConfig, annualInflationRate: Number(v)})} 
+                          type="number" 
+                        />
                       </div>
+
                       <div className="pt-4 border-t border-slate-100">
-                        <h4 className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-60 mb-4">Ajouter un Engin / Machine</h4>
+                        <h4 className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-60 mb-4 font-serif italic flex items-center gap-2"><PlusCircle size={12}/> Ajouter un Engin</h4>
                         <div className="space-y-4">
                            <InputGroupVertical label="Désignation de l'Engin" value={newOpName} onChange={setNewOpName} />
                            <div className="grid grid-cols-2 gap-4">
-                              <InputGroupVertical label="Conso (L/H)" value={newOpCons} onChange={setNewOpCons} type="number" />
-                              <InputGroupVertical label="Heures/Jour" value={newOpHours} onChange={setNewOpHours} type="number" />
+                              <InputGroupVertical label="Puissance (kW)" value={newOpPower} onChange={setNewOpPower} type="number" />
+                              <InputGroupVertical label="Nombre de machines" value={newOpCount} onChange={setNewOpCount} type="number" />
                            </div>
                            <div className="grid grid-cols-2 gap-4">
-                              <InputGroupVertical label="Valeur Engin (DA)" value={newOpValue} onChange={setNewOpValue} type="number" />
-                              <div className="space-y-1.5">
-                                <label className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-70 px-1">Maint. (%)</label>
-                                <select value={newOpMaint} onChange={(e) => setNewOpMaint(e.target.value)} className="w-full bg-slate-50 border border-sleek-border rounded-xl px-4 py-2.5 text-sm font-semibold">
-                                  <option value="2">2%</option>
-                                  <option value="5">5%</option>
-                                  <option value="10">10%</option>
-                                </select>
-                              </div>
+                              <InputGroupVertical label="Conso (L/kWh)" value={newOpConsRate} onChange={setNewOpConsRate} type="number" />
+                              <InputGroupVertical label="Coef Utilisation (0..1)" value={newOpUtilCoef} onChange={setNewOpUtilCoef} type="number" />
                            </div>
                            <div className="space-y-1.5">
-                              <label className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-70 px-1">Affectation</label>
+                              <label className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-70 px-1">Affectation TCR</label>
                               <select 
                                 value={newOpAlloc} 
                                 onChange={(e) => setNewOpAlloc(e.target.value as any)}
@@ -1005,34 +1709,48 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="lg:col-span-8 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col max-h-[480px]">
+                  <div className="lg:col-span-8 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col max-h-[calc(100vh-220px)]">
                     <div className="px-6 py-4 border-b border-sleek-border bg-slate-50 flex justify-between items-center">
                       <h3 className="text-xs font-bold text-sleek-text-muted uppercase tracking-widest flex items-center gap-2"><Wrench size={14}/> Parc d'Équipement Actif</h3>
-                      <span className="bg-sleek-primary/10 text-sleek-primary px-3 py-1 rounded-full text-[10px] font-bold">{machines.length} Machines</span>
+                      <div className="flex items-center gap-3">
+                        <span className="bg-sleek-primary/10 text-sleek-primary px-3 py-1 rounded-full text-[10px] font-bold">{machines.length} Machines</span>
+                      </div>
                     </div>
                     <div className="overflow-y-auto flex-1 custom-scrollbar">
                       <table className="w-full text-left text-[12px]">
                         <thead className="sticky top-0 bg-white border-b border-sleek-border z-10 shadow-sm">
                           <tr className="text-[10px] font-bold text-sleek-text-muted uppercase tracking-wider">
-                            <th className="p-4">Machine</th>
-                            <th className="p-4 text-center">Conso/H</th>
-                            <th className="p-4 text-center">Val (DA)</th>
-                            <th className="p-4 text-right">Carburant/An</th>
-                            <th className="p-4 text-right">Maintenance/An</th>
+                            <th className="p-4">Machine (Type)</th>
+                            <th className="p-4 text-center">Puissance / Nbre</th>
+                            <th className="p-4 text-center">L/kWh</th>
+                            <th className="p-4 text-right">L / heure</th>
+                            <th className="p-4 text-right">L / jour</th>
+                            <th className="p-4 text-right">L / an</th>
+                            <th className="p-4 text-right">Coût (DA/an)</th>
                             <th className="p-4 text-center">Action</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
                           {machines.map(m => {
-                            const fuelAn = m.hourlyConsumption * m.hoursPerDay * opConfig.workDaysPerYear * opConfig.fuelPrice;
-                            const maintAn = m.assetValue * (m.maintenanceRate / 100);
+                            const consoLh = m.powerKw * m.consumptionRate * m.utilizationCoef;
+                            const consoTotalLh = consoLh * m.count;
+                            const consoTotalLjour = consoTotalLh * m.hoursPerDay;
+                            const annualLitres = consoTotalLjour * m.workDaysPerYear;
+                            const annualCost = annualLitres * opConfig.fuelPrice;
                             return (
                               <tr key={m.id} className="hover:bg-slate-50/50 transition-colors">
-                                <td className="p-4 font-semibold text-sleek-text-main">{m.designation}</td>
-                                <td className="p-4 text-center">{m.hourlyConsumption}L @ {m.hoursPerDay}h</td>
-                                <td className="p-4 text-center text-slate-400">{formatCurrency(m.assetValue)}</td>
-                                <td className="p-4 text-right font-mono font-bold text-sleek-primary">{formatCurrency(fuelAn)}</td>
-                                <td className="p-4 text-right font-mono font-bold text-sleek-accent-green">{formatCurrency(maintAn)}</td>
+                                <td className="p-4">
+                                  <div className="font-semibold text-sleek-text-main">{m.designation}</div>
+                                  <div className="text-[9px] text-slate-400 font-bold uppercase tracking-tighter">
+                                    {m.hoursPerDay}h/j • {m.workDaysPerYear}j/an
+                                  </div>
+                                </td>
+                                <td className="p-4 text-center text-[11px]">{m.powerKw} kW × {m.count}</td>
+                                <td className="p-4 text-center text-slate-400 font-mono text-[11px]">{m.consumptionRate} (coef {m.utilizationCoef})</td>
+                                <td className="p-4 text-right font-mono font-bold text-sleek-primary">{consoTotalLh.toLocaleString()}</td>
+                                <td className="p-4 text-right font-mono font-bold text-blue-400">{consoTotalLjour.toLocaleString()}</td>
+                                <td className="p-4 text-right font-mono font-bold text-emerald-500">{annualLitres.toLocaleString()}</td>
+                                <td className="p-4 text-right font-mono font-extrabold text-sleek-accent-green">{formatCurrency(annualCost)}</td>
                                 <td className="p-4 text-center">
                                   <button onClick={() => removeMachine(m.id)} className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"><Trash size={14}/></button>
                                 </td>
@@ -1040,40 +1758,604 @@ export default function App() {
                             );
                           })}
                           {machines.length === 0 && (
-                            <tr><td colSpan={6} className="p-10 text-center text-slate-300 italic">Aucun engin d'exploitation enregistré.</td></tr>
+                            <tr><td colSpan={6} className="p-10 text-center text-slate-300 italic text-sm">Aucun engin d'exploitation enregistré. Ajoutez des machines pour calculer le carburant.</td></tr>
                           )}
                         </tbody>
                       </table>
                     </div>
+                    {/* Foot summary table info */}
+                    {machines.length > 0 && (
+                      <div className="bg-slate-900 text-white p-6 grid grid-cols-3 gap-6 border-t border-slate-700">
+                        <div className="flex flex-col group relative cursor-help">
+                           <span className="text-[10px] text-white/40 uppercase font-black tracking-widest mb-1 flex items-center gap-1.5">
+                            Débit Total (L / Heure) <Info size={10}/>
+                           </span>
+                           <span className="text-xl font-mono font-bold text-sky-400">
+                              {machines.reduce((acc, m) => acc + (m.powerKw * m.consumptionRate * m.utilizationCoef * m.count), 0).toLocaleString()} <span className="text-xs font-sans opacity-60">L / h</span>
+                           </span>
+                           <FormulaTooltip formula="Σ (Puis. × Conso. × Coef. × Nombre)" />
+                        </div>
+                        <div className="flex flex-col group relative cursor-help">
+                           <span className="text-[10px] text-white/40 uppercase font-black tracking-widest mb-1 flex items-center gap-1.5">
+                            Consommation / Jour (L / Jour) <Info size={10}/>
+                           </span>
+                           <span className="text-xl font-mono font-bold text-blue-400">
+                              {machines.reduce((acc, m) => acc + (m.powerKw * m.consumptionRate * m.utilizationCoef * m.count * m.hoursPerDay), 0).toLocaleString()} <span className="text-xs font-sans opacity-60">L / jour</span>
+                           </span>
+                           <FormulaTooltip formula="Σ (L/h_machine × h/jour_machine)" />
+                        </div>
+                        <div className="flex flex-col group relative cursor-help">
+                           <span className="text-[10px] text-white/40 uppercase font-black tracking-widest mb-1 flex items-center gap-1.5">
+                            Volume Annuel Estimé (L / An) <Info size={10}/>
+                           </span>
+                           <span className="text-xl font-mono font-bold text-emerald-400">
+                              {machines.reduce((acc, m) => acc + (m.powerKw * m.consumptionRate * m.utilizationCoef * m.count * m.hoursPerDay * m.workDaysPerYear), 0).toLocaleString()} <span className="text-xs font-sans opacity-60">L / an</span>
+                           </span>
+                           <FormulaTooltip formula="Σ (L/jour_machine × jours/an_machine)" />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex-1 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col">
+                {/* Section Projection Carburant */}
+                <div className="flex-1 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col min-h-[400px]">
                    <div className="px-6 py-4 border-b border-sleek-border bg-slate-50 flex items-center justify-between">
-                      <h3 className="text-xs font-bold uppercase tracking-widest text-sleek-text-muted">Impact Global sur le TCR (Injection de Matières & Services)</h3>
-                      <div className="bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest">Inflation de {opConfig.annualInflationRate}% appliquée de l'An 2 à 10</div>
+                      <h3 className="text-xs font-bold uppercase tracking-widest text-sleek-text-muted">Projection Carburant sur 10 ans (Injection Automatique TCR)</h3>
+                      <div className="bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-2">
+                        <Activity size={12}/> Inflation de {opConfig.annualInflationRate}% active
+                      </div>
                    </div>
                    <div className="overflow-auto flex-1 p-6 flex flex-col">
                       <div className="grid grid-cols-10 gap-3 min-w-[900px]">
                          {calculatedYears.map((y, i) => (
-                           <div key={i} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                              <span className="text-[9px] font-bold text-slate-400 text-center">Année {i+1}</span>
-                              <div className="border-t border-slate-200 pt-2 space-y-2">
-                                <div className="flex flex-col">
-                                   <span className="text-[8px] uppercase font-bold text-sleek-primary opacity-60">Fuel</span>
-                                   <span className="text-[10px] font-mono font-bold">{formatCurrency(opResults.fuel[i])}</span>
-                                </div>
-                                <div className="flex flex-col">
-                                   <span className="text-[8px] uppercase font-bold text-sleek-accent-green opacity-60">Maint.</span>
-                                   <span className="text-[10px] font-mono font-bold">{formatCurrency(opResults.maintenance[i])}</span>
-                                </div>
-                              </div>
+                           <div key={i} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100 items-center">
+                              <span className="text-[9px] font-bold text-slate-400">Année {i+1}</span>
+                              <div className="text-[10px] font-mono font-bold text-sleek-primary">{formatCurrency(opResults.fuel.granite[i] + opResults.fuel.tuf[i] + opResults.fuel.common[i])}</div>
                            </div>
                          ))}
                       </div>
-                      <div className="mt-8 space-y-2 border-t border-slate-100 pt-4 text-blue-600 italic font-medium">
-                         <p className="text-[11px] flex items-center gap-2">💡 Ce montant (Fuel) est injecté automatiquement dans la ligne MATIÈRES du TCR.</p>
-                         <p className="text-[11px] flex items-center gap-2">💡 Ce montant (Maintenance) est injecté automatiquement dans la ligne SERVICES du TCR.</p>
+                      <div className="mt-8 space-y-3 bg-blue-50/50 p-6 rounded-2xl border border-blue-100">
+                         <div className="flex items-start gap-4">
+                            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shrink-0 shadow-lg shadow-blue-600/20"><Info size={20}/></div>
+                            <div className="space-y-1">
+                               <h4 className="text-sm font-bold text-blue-900 tracking-tight">Note Technique sur l'intégration TCR</h4>
+                               <p className="text-[11px] text-blue-800/70 leading-relaxed font-medium">
+                                  Le coût annuel du carburant calculé ci-dessus est injecté <b>automatiquement</b> dans la ligne <span className="font-bold underline text-blue-900">Matières & Consommables</span> du TCR.
+                                  Si vous saisissez manuellement une valeur dans le TCR, elle sera additionnée au coût du carburant pour refléter les autres intrants (explosifs, lubrifiants, etc.).
+                               </p>
+                            </div>
+                         </div>
+                      </div>
+                   </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'elec' && (
+              <motion.div 
+                key="elec" 
+                initial={{ opacity: 0, y: 15 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                exit={{ opacity: 0, scale: 0.98 }} 
+                transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                className="flex-1 flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar min-h-0"
+              >
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 shrink-0">
+                  <div className="lg:col-span-4 bg-white p-6 rounded-2xl border border-sleek-border shadow-md overflow-y-auto max-h-[calc(100vh-220px)] custom-scrollbar">
+                    <h3 className="text-sm font-bold mb-4 flex items-center gap-2 text-sleek-text-main"><Zap size={16} className="text-sleek-primary"/> Électricité par Groupes</h3>
+                    <div className="space-y-4">
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <InputGroupVertical 
+                            label="Heures/Jour (Défaut)" 
+                            value={electricityConfig.hoursPerDay.toString()} 
+                            onChange={v => setElectricityConfig({...electricityConfig, hoursPerDay: Number(v)})} 
+                            type="number" 
+                          />
+                          <InputGroupVertical 
+                            label="Jours/An (Défaut)" 
+                            value={electricityConfig.workDaysPerYear.toString()} 
+                            onChange={v => setElectricityConfig({...electricityConfig, workDaysPerYear: Number(v)})} 
+                            type="number" 
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <InputGroupVertical 
+                            label="Cos φ" 
+                            value={electricityConfig.cosPhi.toString()} 
+                            onChange={v => setElectricityConfig({...electricityConfig, cosPhi: Number(v)})} 
+                            type="number" 
+                          />
+                          <InputGroupVertical 
+                            label="kVA / Groupe" 
+                            value={electricityConfig.kvaPerGroup.toString()} 
+                            onChange={v => setElectricityConfig({...electricityConfig, kvaPerGroup: Number(v)})} 
+                            type="number" 
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <InputGroupVertical 
+                            label="Prix Diesel (DA/L)" 
+                            value={opConfig.fuelPrice.toString()} 
+                            onChange={v => setOpConfig({...opConfig, fuelPrice: Number(v)})} 
+                            type="number" 
+                          />
+                          <InputGroupVertical 
+                            label="Conso Grp (L/kWh)" 
+                            value={electricityConfig.specificConsumption.toString()} 
+                            onChange={v => setElectricityConfig({...electricityConfig, specificConsumption: Number(v)})} 
+                            type="number" 
+                          />
+                        </div>
+                      </div>
+
+                      <div className="pt-4 border-t border-slate-100">
+                        <h4 className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-60 mb-4 font-serif italic flex items-center gap-2"><PlusCircle size={12}/> Ajouter un Poste de Consommation</h4>
+                        <div className="space-y-4">
+                           <InputGroupVertical label="Désignation" value={newElecName} onChange={setNewElecName} />
+                           <div className="grid grid-cols-2 gap-4">
+                              <InputGroupVertical label="Puissance Puis. (kW)" value={newElecPower} onChange={setNewElecPower} type="number" />
+                              <InputGroupVertical label="Nombre" value={newElecCount} onChange={setNewElecCount} type="number" />
+                           </div>
+                           <InputGroupVertical label="Coef Utilisation (0..1)" value={newElecUtilCoef} onChange={setNewElecUtilCoef} type="number" />
+                        </div>
+                      </div>
+                      <button onClick={addElectricityLine} className="w-full py-3 bg-sleek-primary text-white rounded-xl font-bold text-sm tracking-wide mt-2 shadow-lg shadow-sleek-primary/10 transition-all hover:scale-[1.02] active:scale-[0.98]">
+                        Ajouter au Bilan de Puissance
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="lg:col-span-8 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col max-h-[calc(100vh-220px)]">
+                    <div className="px-6 py-4 border-b border-sleek-border bg-slate-50 flex justify-between items-center">
+                      <h3 className="text-xs font-bold text-sleek-text-muted uppercase tracking-widest flex items-center gap-2"><Activity size={14}/> Bilan de Puissance</h3>
+                      <div className="flex items-center gap-3">
+                        <span className="bg-sleek-primary/10 text-sleek-primary px-3 py-1 rounded-full text-[10px] font-bold">{electricityLines.length} Postes</span>
+                      </div>
+                    </div>
+                    <div className="overflow-y-auto flex-1 custom-scrollbar">
+                      <table className="w-full text-left text-[12px]">
+                        <thead className="sticky top-0 bg-white border-b border-sleek-border z-10 shadow-sm">
+                          <tr className="text-[10px] font-bold text-sleek-text-muted uppercase tracking-wider">
+                            <th className="p-4">Désignation</th>
+                            <th className="p-4 text-center">Puissance unitaire (kW)</th>
+                            <th className="p-4 text-center">Nombre</th>
+                            <th className="p-4 text-center">Coef. Util.</th>
+                            <th className="p-4 text-right text-sleek-primary">P_ligne (kW)</th>
+                            <th className="p-4 text-center">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {electricityLines.map(l => {
+                            const pLine = l.powerKw * l.count * l.utilizationCoef;
+                            return (
+                              <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
+                                <td className="p-4">
+                                  <div className="font-semibold text-sleek-text-main">{l.designation}</div>
+                                  <div className="text-[9px] text-slate-400 font-bold uppercase tracking-tighter">
+                                    {l.hoursPerDay}h/j • {l.workDaysPerYear}j/an
+                                  </div>
+                                </td>
+                                <td className="p-4 text-center">{l.powerKw} kW</td>
+                                <td className="p-4 text-center">{l.count}</td>
+                                <td className="p-4 text-center text-slate-400 font-mono">{l.utilizationCoef}</td>
+                                <td className="p-4 text-right font-mono font-bold text-sleek-primary">{pLine.toLocaleString()} kW</td>
+                                <td className="p-4 text-center">
+                                  <button onClick={() => removeElectricityLine(l.id)} className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"><Trash size={14}/></button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {electricityLines.length === 0 && (
+                            <tr><td colSpan={6} className="p-10 text-center text-slate-300 italic text-sm">Aucun poste de consommation défini.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Summary Footer for Electricity */}
+                    {electricityLines.length > 0 && (
+                      <div className="bg-slate-900 text-white p-6 grid grid-cols-2 lg:grid-cols-4 gap-6 border-t border-slate-700 shrink-0">
+                        {(() => {
+                          const pTotal = electricityLines.reduce((acc, l) => acc + (l.powerKw * l.count * l.utilizationCoef), 0);
+                          const sTotal = pTotal / electricityConfig.cosPhi;
+                          const nGroups = Math.ceil(sTotal / electricityConfig.kvaPerGroup);
+                          
+                          const energyAn = electricityLines.reduce((acc, l) => {
+                            const pLine = l.powerKw * l.count * l.utilizationCoef;
+                            return acc + (pLine * l.hoursPerDay * l.workDaysPerYear);
+                          }, 0);
+
+                          const litresAn = energyAn * electricityConfig.specificConsumption;
+                          const costAn = litresAn * opConfig.fuelPrice;
+
+                          return (
+                            <>
+                              <div className="flex flex-col">
+                                 <span className="text-[9px] text-white/40 uppercase font-bold tracking-widest mb-1">Puissance Apparente</span>
+                                 <span className="text-lg font-mono font-bold text-sky-400">{sTotal.toFixed(0)} <span className="text-[10px] font-sans opacity-60">kVA</span></span>
+                              </div>
+                              <div className="flex flex-col">
+                                 <span className="text-[9px] text-white/40 uppercase font-bold tracking-widest mb-1">Dimensionnement</span>
+                                 <span className="text-lg font-mono font-bold text-blue-400">{nGroups} <span className="text-[10px] font-sans opacity-60">GE de {electricityConfig.kvaPerGroup}kVA</span></span>
+                              </div>
+                              <div className="flex flex-col">
+                                 <span className="text-[9px] text-white/40 uppercase font-bold tracking-widest mb-1">Énergie Annuelle</span>
+                                 <span className="text-lg font-mono font-bold text-amber-400">{energyAn.toLocaleString()} <span className="text-[10px] font-sans opacity-60">kWh/an</span></span>
+                              </div>
+                              <div className="flex flex-col">
+                                 <span className="text-[9px] text-emerald-400 uppercase font-black tracking-widest mb-1">Coût Diesel Estimé</span>
+                                 <span className="text-lg font-mono font-bold text-sleek-accent-green">{formatCurrency(costAn)} <span className="text-[10px] font-sans opacity-60">DA/an</span></span>
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Section Projection Électricité */}
+                <div className="flex-1 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col min-h-[400px]">
+                   <div className="px-6 py-4 border-b border-sleek-border bg-slate-50 flex items-center justify-between">
+                      <h3 className="text-xs font-bold uppercase tracking-widest text-sleek-text-muted">Projection Coût Électricité (Groupes) sur 10 ans</h3>
+                      <div className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-2">
+                        <Check size={12}/> Injection TCR Activée
+                      </div>
+                   </div>
+                   <div className="overflow-auto flex-1 p-6 flex flex-col">
+                      <div className="grid grid-cols-10 gap-3 min-w-[900px]">
+                         {calculatedYears.map((y, i) => (
+                           <div key={i} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100 items-center">
+                              <span className="text-[9px] font-bold text-slate-400">Année {i+1}</span>
+                              <div className="text-[10px] font-mono font-bold text-sleek-primary">{formatCurrency(electricityResults.granite[i] + electricityResults.tuf[i] + electricityResults.common[i])}</div>
+                           </div>
+                         ))}
+                      </div>
+                      <div className="mt-8 space-y-3 bg-amber-50/50 p-6 rounded-2xl border border-amber-100 italic">
+                         <div className="flex items-start gap-4">
+                            <div className="w-10 h-10 bg-amber-500 rounded-xl flex items-center justify-center text-white shrink-0 shadow-lg shadow-amber-500/20"><Zap size={20}/></div>
+                            <div className="space-y-1">
+                               <h4 className="text-sm font-bold text-amber-900 tracking-tight">Configuration Zone Non Électrifiée</h4>
+                               <p className="text-[11px] text-amber-800/70 leading-relaxed font-medium">
+                                  En l'absence de réseau Sonelgaz, l'énergie est produite exclusivement sur site. 
+                                  La consommation de diesel des groupes (<b>{electricityConfig.specificConsumption} L/kWh</b>) est convertie en coût monétaire et s'ajoute au carburant des engins.
+                                  Le dimensionnement suggéré est de <b>{Math.ceil((electricityLines.reduce((acc, l) => acc + (l.powerKw * l.count * l.utilizationCoef), 0) / electricityConfig.cosPhi) / electricityConfig.kvaPerGroup)} groupes de {electricityConfig.kvaPerGroup} kVA</b> pour couvrir la pointe de { (electricityLines.reduce((acc, l) => acc + (l.powerKw * l.count * l.utilizationCoef), 0) / electricityConfig.cosPhi).toFixed(0) } kVA.
+                               </p>
+                            </div>
+                         </div>
+                      </div>
+                   </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'acc' && (
+              <motion.div 
+                key="acc" 
+                initial={{ opacity: 0, y: 15 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                exit={{ opacity: 0, scale: 0.98 }} 
+                transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                className="flex-1 flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar min-h-0 relative"
+              >
+                {/* 1. Diamond Wire Modal Overlay */}
+                <AnimatePresence>
+                  {isDiamondModalOpen && (
+                    <motion.div 
+                      className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 pointer-events-auto"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                    >
+                      <motion.div 
+                        className="bg-white rounded-[32px] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 pointer-events-auto cursor-default"
+                        initial={{ scale: 0.95, y: 20 }}
+                        animate={{ scale: 1, y: 0 }}
+                        exit={{ scale: 0.95, y: 20 }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                         <div className="bg-sleek-primary p-6 text-white flex justify-between items-center select-none">
+                            <div className="flex items-center gap-3">
+                               <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><Calculator size={20}/></div>
+                               <div>
+                                  <h3 className="text-sm font-bold tracking-tight">Calcul consommation Fil diamanté</h3>
+                                  <p className="text-[10px] opacity-70 font-medium uppercase tracking-wider">Paramètres de production extraction</p>
+                               </div>
+                            </div>
+                            <button onClick={() => setIsDiamondModalOpen(false)} className="w-8 h-8 flex items-center justify-center rounded-full bg-black/10 hover:bg-black/20 transition-all"><X size={18}/></button>
+                         </div>
+                         
+                         <div className="p-8 space-y-6">
+                            <div className="grid grid-cols-1">
+                               <InputGroupVertical label="Désignation de la machine / Poste" value={dmDesignation} onChange={setDmDesignation} />
+                            </div>
+                            <div className="grid grid-cols-2 gap-6">
+                               <InputGroupVertical label="Vs : Vitesse de sciage (m²/h)" value={dmVs} onChange={setDmVs} type="number" />
+                               <InputGroupVertical label="Cfu : Conso. unitaire (m/m²)" value={dmCfu} onChange={setDmCfu} type="number" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-6">
+                               <InputGroupVertical label="Heures / jour (h/j)" value={dmHj} onChange={setDmHj} type="number" />
+                               <InputGroupVertical label="Jours / an (j/an)" value={dmJa} onChange={setDmJa} type="number" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-6 items-end">
+                               <InputGroupVertical label="Nombre de machines (N)" value={dmN} onChange={setDmN} type="number" />
+                               <div className="space-y-2">
+                                  <label className="text-[10px] font-bold text-sleek-text-muted uppercase tracking-wider ml-1">Affectation</label>
+                                  <select 
+                                   value={dmAlloc} 
+                                   onChange={(e) => setDmAlloc(e.target.value as any)}
+                                   className="w-full bg-sleek-bg/50 border border-sleek-border rounded-xl px-4 py-3 text-sm font-semibold focus:ring-2 focus:ring-sleek-primary/10 focus:bg-white focus:border-sleek-primary transition-all outline-none"
+                                 >
+                                   <option value="Granite">Uniquement Granite</option>
+                                   <option value="Tuf">Uniquement Tuf</option>
+                                   <option value="Common">Utilisation Commune</option>
+                                 </select>
+                               </div>
+                            </div>
+
+                            <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100 space-y-4">
+                               <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-left">Résultats Intermédiaires</span>
+                               </div>
+                               <div className="grid grid-cols-3 gap-4">
+                                  <div className="space-y-1">
+                                     <div className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Conso. Heure</div>
+                                     <div className="text-sm font-mono font-black text-slate-700">{(Number(dmVs) * Number(dmCfu)).toFixed(2)} <span className="text-[10px] font-medium opacity-40">m/h</span></div>
+                                  </div>
+                                  <div className="space-y-1">
+                                     <div className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Conso. Jour</div>
+                                     <div className="text-sm font-mono font-black text-slate-700">{(Number(dmVs) * Number(dmCfu) * Number(dmHj)).toFixed(1)} <span className="text-[10px] font-medium opacity-40">m/j</span></div>
+                                  </div>
+                                  <div className="space-y-1 p-2 bg-emerald-50 rounded-lg border border-emerald-100">
+                                     <div className="text-[9px] font-bold text-emerald-600 uppercase tracking-tighter">Consommation Annuelle</div>
+                                     <div className="text-lg font-mono font-black text-emerald-700">
+                                        {formatCompact(Number(dmVs) * Number(dmCfu) * Number(dmHj) * Number(dmJa) * Number(dmN))} <span className="text-[10px] font-medium opacity-60">m/an</span>
+                                     </div>
+                                  </div>
+                                </div>
+                            </div>
+
+                            <div className="flex gap-4 pt-2">
+                               <button 
+                                 onClick={() => setIsDiamondModalOpen(false)}
+                                 className="flex-1 py-4 px-6 border-2 border-slate-100 rounded-2xl text-slate-400 font-bold text-sm tracking-wide hover:bg-slate-50 transition-all active:scale-[0.98]"
+                               >
+                                 Annuler
+                               </button>
+                               <button 
+                                 onClick={applyDiamondCalculation}
+                                 className="flex-[2] py-4 px-6 bg-sleek-primary text-white rounded-2xl font-bold text-sm tracking-wide shadow-xl shadow-sleek-primary/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                               >
+                                 Appliquer le Calcul
+                               </button>
+                            </div>
+                         </div>
+                      </motion.div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* 2. Special Card: Fil Diamanté */}
+                <div className="bg-white p-8 rounded-[32px] border border-sleek-border shadow-xl relative overflow-hidden group mb-4 shrink-0 select-text">
+                   <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-opacity pointer-events-none">
+                      <Zap size={120} strokeWidth={1} className="text-sleek-primary"/>
+                   </div>
+                   
+                   <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-8">
+                      <div className="space-y-1">
+                         <div className="flex items-center gap-3">
+                            <div className="w-12 h-12 bg-sleek-primary/10 text-sleek-primary rounded-2xl flex items-center justify-center"><Zap size={24}/></div>
+                            <div>
+                               <h2 className="text-xl font-black text-sleek-text-main tracking-tight">Fil diamanté (Configurateur)</h2>
+                               <p className="text-xs font-semibold text-sleek-text-muted">Ajouter des postes de consommation spécifiques</p>
+                            </div>
+                         </div>
+                         <div className="mt-4 flex flex-wrap gap-2">
+                            <span className="px-2 py-1 bg-sky-100 text-sky-600 rounded text-[9px] font-black tracking-widest uppercase flex items-center gap-1"><Settings size={10}/> Mode Déterminé</span>
+                         </div>
+                      </div>
+
+                      <div className="flex-1 grid grid-cols-1 md:grid-cols-5 gap-4">
+                         <div className="space-y-2">
+                            <InputGroupVertical label="Désignation" value={dmDesignation} onChange={setDmDesignation} />
+                         </div>
+                         <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-sleek-text-muted uppercase tracking-wider ml-1">Affectation</label>
+                            <select 
+                             value={dmAlloc} 
+                             onChange={(e) => setDmAlloc(e.target.value as any)}
+                             className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3.5 text-sm font-semibold focus:ring-4 focus:ring-sleek-primary/10 focus:bg-white focus:border-sleek-primary transition-all outline-none"
+                           >
+                             <option value="Granite">Granite</option>
+                             <option value="Tuf">Tuf</option>
+                             <option value="Common">Commune</option>
+                           </select>
+                         </div>
+                         <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Consommation (m/an)</label>
+                            <div className="relative">
+                               <input 
+                                 type="number" 
+                                 value={dmQty === '0' ? '' : dmQty}
+                                 onChange={(e) => setDmQty(e.target.value)}
+                                 className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-lg font-mono font-black focus:ring-4 focus:ring-sleek-primary/10 focus:bg-white focus:border-sleek-primary transition-all outline-none"
+                                 placeholder="0"
+                               />
+                               <button 
+                                 onClick={() => setIsDiamondModalOpen(true)}
+                                 className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-sleek-primary shadow-sm hover:bg-sleek-primary hover:text-white transition-all"
+                                 title="Ouvrir le calculateur"
+                               >
+                                  <Calculator size={18}/>
+                               </button>
+                            </div>
+                         </div>
+                         <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Prix Unitaire (DA/m)</label>
+                            <input 
+                              type="number" 
+                              value={dmUnitPrice === '0' ? '' : dmUnitPrice}
+                              onChange={(e) => setDmUnitPrice(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-lg font-mono font-black focus:ring-4 focus:ring-sleek-primary/10 focus:bg-white focus:border-sleek-primary transition-all outline-none text-sleek-primary"
+                              placeholder="0"
+                            />
+                         </div>
+                         <div className="flex items-end">
+                            <button 
+                              onClick={addDiamondAccessory}
+                              className="w-full h-[60px] bg-sleek-primary text-white rounded-[24px] flex items-center justify-center gap-3 font-black text-sm tracking-widest shadow-lg shadow-sleek-primary/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                            >
+                               <PlusCircle size={18}/> AJOUTER
+                            </button>
+                         </div>
+                      </div>
+                   </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 shrink-0 min-w-0">
+                  <div className="lg:col-span-4 bg-white p-6 rounded-2xl border border-sleek-border shadow-md h-fit min-w-0">
+                    <h3 className="text-sm font-bold mb-4 flex items-center gap-2 text-sleek-text-main"><PlusCircle size={16} className="text-sleek-primary"/> Ajouter un Accessoire</h3>
+                    <div className="space-y-4">
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-4">
+                        <InputGroupVertical label="Désignation" value={newAccName} onChange={setNewAccName} />
+                        <div className="grid grid-cols-2 gap-4">
+                          <InputGroupVertical label="Quantité / An" value={newAccQty} onChange={setNewAccQty} type="number" />
+                          <InputGroupVertical label="Unité" value={newAccUnit} onChange={setNewAccUnit} />
+                        </div>
+                        <InputGroupVertical label="Prix Unitaire (DA/Unité)" value={newAccPrice} onChange={v => setNewAccPrice(v)} type="number" />
+                        <div className="space-y-2">
+                           <label className="text-[10px] font-bold text-sleek-text-muted uppercase tracking-wider ml-1">Affectation</label>
+                           <select 
+                            value={newAccAlloc} 
+                            onChange={(e) => setNewAccAlloc(e.target.value as any)}
+                            className="w-full bg-sleek-bg/50 border border-sleek-border rounded-xl px-4 py-3 text-sm font-semibold focus:ring-2 focus:ring-sleek-primary/10 focus:bg-white focus:border-sleek-primary transition-all outline-none"
+                          >
+                            <option value="Granite">Uniquement Granite</option>
+                            <option value="Tuf">Uniquement Tuf</option>
+                            <option value="Common">Utilisation Commune</option>
+                          </select>
+                        </div>
+                      </div>
+                      <button onClick={addAccessory} className="w-full py-3 bg-sleek-primary text-white rounded-xl font-bold text-sm tracking-wide mt-2 shadow-lg shadow-sleek-primary/10 transition-all hover:scale-[1.02] active:scale-[0.98]">
+                        Ajouter cet Accessoire
+                      </button>
+                    </div>
+                  </div>
+
+                <div className="lg:col-span-8 bg-white rounded-2xl border border-sleek-border shadow-md flex flex-col min-h-[400px] lg:min-h-0 select-text min-w-0">
+                    <div className="px-6 py-4 border-b border-sleek-border bg-slate-50 flex justify-between items-center shrink-0">
+                      <h3 className="text-xs font-bold text-sleek-text-muted uppercase tracking-widest flex items-center gap-2"><PlusCircle size={14}/> Liste des Coûts Accessoires</h3>
+                      <div className="flex items-center gap-3">
+                        <span className="bg-sleek-primary/10 text-sleek-primary px-3 py-1 rounded-full text-[10px] font-bold">{accessoryConfig.items.length} Accessoires</span>
+                      </div>
+                    </div>
+                    <div className="overflow-auto flex-1 custom-scrollbar min-h-0">
+                      <table className="w-full text-left text-[12px] border-collapse">
+                        <thead className="sticky top-0 bg-white border-b border-sleek-border z-10 shadow-sm">
+                          <tr className="text-[10px] font-bold text-sleek-text-muted uppercase tracking-wider">
+                            <th className="p-4">Désignation</th>
+                            <th className="p-4 text-center">Affectation</th>
+                            <th className="p-4 text-center">Quantité / An</th>
+                            <th className="p-4 text-center">Unité</th>
+                            <th className="p-4 text-center">Prix Unitaire</th>
+                            <th className="p-4 text-right text-sleek-primary">Total (DA/an)</th>
+                            <th className="p-4 text-center">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {accessoryConfig.items.map(item => {
+                            const total = item.qtyPerYear * item.unitPrice;
+                            const isFil = item.designation.toLowerCase().includes('fil');
+                            return (
+                              <tr key={item.id} className={cn("hover:bg-slate-50/50 transition-colors", isFil ? "bg-indigo-50/10" : "")}>
+                                <td className="p-4 font-semibold text-sleek-text-main">
+                                  <div className="flex items-center gap-2">
+                                     {isFil && <Zap size={12} className="text-sleek-primary"/>}
+                                     {item.designation}
+                                  </div>
+                                  {item.calculationMode === 'calculated' && (
+                                    <div className="text-[9px] text-indigo-500 font-bold uppercase mt-1 flex items-center gap-1">
+                                      <Calculator size={10}/> vs:{item.vs}m²/h • hj:{item.hoursPerDay}h
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="p-4 text-center">
+                                  <span className={cn(
+                                    "px-2 py-0.5 rounded-full text-[9px] font-bold uppercase",
+                                    item.allocation === 'Granite' ? "bg-sleek-primary/10 text-sleek-primary" :
+                                    item.allocation === 'Tuf' ? "bg-orange-100 text-orange-600" :
+                                    "bg-slate-100 text-slate-500"
+                                  )}>
+                                    {item.allocation}
+                                  </span>
+                                </td>
+                                <td className="p-4 text-center font-mono">{item.qtyPerYear.toLocaleString()}</td>
+                                <td className="p-4 text-center text-slate-400 font-medium uppercase tracking-widest text-[9px]">{item.unit}</td>
+                                <td className="p-4 text-center font-mono">{item.unitPrice.toLocaleString()} DA</td>
+                                <td className="p-4 text-right font-mono font-bold text-sleek-primary">{total.toLocaleString()} DA</td>
+                                <td className="p-4 text-center">
+                                  <button onClick={() => removeAccessory(item.id)} className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all">
+                                    <Trash size={14}/>
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {accessoryConfig.items.length === 0 && (
+                            <tr><td colSpan={7} className="p-10 text-center text-slate-300 italic text-sm">Aucun accessoire défini.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Summary Footer for Accessories */}
+                    {accessoryConfig.items.length > 0 && (
+                      <div className="bg-slate-900 text-white p-6 flex justify-between items-center border-t border-slate-700 shrink-0">
+                        <div className="flex flex-col">
+                           <span className="text-[9px] text-white/40 uppercase font-bold tracking-widest mb-1">Total Coûts Accessoires (Année 1)</span>
+                           <span className="text-xl font-mono font-bold text-sleek-accent-green">
+                              {formatCurrency(accessoryConfig.items.reduce((acc, item) => acc + (item.qtyPerYear * item.unitPrice), 0))} <span className="text-xs font-sans opacity-60">DA/an</span>
+                           </span>
+                        </div>
+                        <div className="flex items-center gap-2 bg-white/5 px-4 py-2 rounded-xl border border-white/10">
+                          <Activity size={14} className="text-blue-400"/>
+                          <span className="text-[10px] font-bold text-white/60">Sujet à l'inflation annuelle prévue ({opConfig.annualInflationRate}%)</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Section Projection Accessoires */}
+                <div className="flex-1 bg-white rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col min-h-[400px]">
+                   <div className="px-6 py-4 border-b border-sleek-border bg-slate-50 flex items-center justify-between">
+                      <h3 className="text-xs font-bold uppercase tracking-widest text-sleek-text-muted">Projection Coûts Accessoires sur 10 ans</h3>
+                      <div className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-2">
+                        <Check size={12}/> Injection TCR Activée
+                      </div>
+                   </div>
+                   <div className="overflow-auto flex-1 p-6 flex flex-col">
+                      <div className="grid grid-cols-10 gap-3 min-w-[900px]">
+                         {calculatedYears.map((y, i) => (
+                           <div key={i} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100 items-center">
+                              <span className="text-[9px] font-bold text-slate-400">Année {i+1}</span>
+                              <div className="text-[10px] font-mono font-bold text-sleek-primary">{formatCurrency(accessoryResults.granite[i] + accessoryResults.tuf[i] + accessoryResults.common[i])}</div>
+                           </div>
+                         ))}
+                      </div>
+                      <div className="mt-8 space-y-3 bg-amber-50/50 p-6 rounded-2xl border border-amber-100 italic">
+                         <div className="flex items-start gap-4">
+                            <div className="w-10 h-10 bg-amber-500 rounded-xl flex items-center justify-center text-white shrink-0 shadow-lg shadow-amber-500/20"><PlusCircle size={20}/></div>
+                            <div className="space-y-1">
+                               <h4 className="text-sm font-bold text-amber-900 tracking-tight">Accessoires & Consommables Divers</h4>
+                               <p className="text-[11px] text-amber-800/70 leading-relaxed font-medium">
+                                  Cette section permet d'inclure des consommables spécifiques (comme le fil diamanté, les couronnes, ou câbles) qui ne sont pas classés comme carburant mais affectent directement la marge opérationnelle.
+                                  Le total annuel est injecté dans le poste <b>Matières & Consommables</b> du TCR.
+                               </p>
+                            </div>
+                         </div>
                       </div>
                    </div>
                 </div>
@@ -1108,7 +2390,8 @@ export default function App() {
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
-                          saveManualSnapshot();
+ 
+
                         }}
                         className="flex items-center gap-2 px-4 py-2 bg-sleek-primary text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-sleek-primary/90 transition-all shadow-lg shadow-sleek-primary/20"
                       >
@@ -1134,9 +2417,8 @@ export default function App() {
                             <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-200 pb-2">Fiscalité</h4>
                             <InputGroupVertical 
                               label="Taux IBM (%)" 
-                              value={(ibmRate * 100).toString()} 
+                              value={((ibmRate ?? 0) * 100).toString()} 
                               onChange={(v) => setIbmRate(Number(v) / 100)} 
-                              onBlur={() => pushToHistory(years)}
                               type="number"
                               helper="Impôt sur les Bénéfices des Travaux Miniers"
                             />
@@ -1145,17 +2427,15 @@ export default function App() {
                             <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-200 pb-2">Personnel</h4>
                             <div className="space-y-4">
                               <InputGroupVertical 
-                                label="Charges Sociales (%)" 
-                                value={(hrConfig.socialChargesRate * 100).toString()} 
+                               label="Charges Sociales (%)" 
+                                value={((hrConfig.socialChargesRate ?? 0) * 100).toString()} 
                                 onChange={(v) => setHrConfig({...hrConfig, socialChargesRate: Number(v)/100})} 
-                                onBlur={() => pushToHistory(years)}
                                 type="number"
                               />
                               <InputGroupVertical 
                                 label="Augmentation Annuelle (%)" 
-                                value={(hrConfig.annualIncreaseRate * 100).toString()} 
+                                value={((hrConfig.annualIncreaseRate ?? 0) * 100).toString()} 
                                 onChange={(v) => setHrConfig({...hrConfig, annualIncreaseRate: Number(v)/100})} 
-                                onBlur={() => pushToHistory(years)}
                                 type="number"
                               />
                             </div>
@@ -1165,28 +2445,26 @@ export default function App() {
                             <div className="space-y-4">
                               <InputGroupVertical 
                                 label="Inflation Fuel/Maint (%)" 
-                                value={opConfig.annualInflationRate.toString()} 
+                                value={(opConfig.annualInflationRate ?? 0).toString()} 
                                 onChange={(v) => setOpConfig({...opConfig, annualInflationRate: Number(v)})} 
-                                onBlur={() => pushToHistory(years)}
                                 type="number"
                               />
                               <InputGroupVertical 
                                 label="Prix du Litre (DA)" 
-                                value={opConfig.fuelPrice.toString()} 
+                                value={(opConfig.fuelPrice ?? 0).toString()} 
                                 onChange={(v) => setOpConfig({...opConfig, fuelPrice: Number(v)})} 
-                                onBlur={() => pushToHistory(years)}
                                 type="number"
                               />
                             </div>
                           </div>
-                          <div className="space-y-4">
-                            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-200 pb-2">Calendrier</h4>
+                          <div className="space-y-4 opacity-40 grayscale pointer-events-none cursor-not-allowed">
+                            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-200 pb-2">Calendrier (Obsolète)</h4>
                             <InputGroupVertical 
                               label="Jours Ouvrable / An" 
-                              value={opConfig.workDaysPerYear.toString()} 
-                              onChange={(v) => setOpConfig({...opConfig, workDaysPerYear: Number(v)})} 
-                              onBlur={() => pushToHistory(years)}
+                              value={(opConfig.workDaysPerYear ?? 0).toString()} 
+                              onChange={() => {}} 
                               type="number"
+                              helper="Désormais indépendant par module"
                             />
                           </div>
                         </div>
@@ -1219,8 +2497,8 @@ export default function App() {
                    <div>
                      <h4 className="font-bold text-sm">Synchronisation Totale Active</h4>
                      <p className="text-xs opacity-70 leading-relaxed mt-1">
-                       Les dotations aux amortissements et les frais de personnel sont automatiquement synchronisés. 
-                       Les modifications dans les modules <span className="underline cursor-pointer font-bold hover:text-indigo-600" onClick={() => setActiveTab('invest')}>Investissements</span> et <span className="underline cursor-pointer font-bold hover:text-indigo-600" onClick={() => setActiveTab('hr')}>RH</span> impactent immédiatement votre TCR.
+                       Les dotations aux amortissements, les frais de personnel et <b>le carburant</b> sont automatiquement synchronisés. 
+                       Les modifications dans les modules <span className="underline cursor-pointer font-bold hover:text-indigo-600" onClick={() => setActiveTab('invest')}>Investissements</span>, <span className="underline cursor-pointer font-bold hover:text-indigo-600" onClick={() => setActiveTab('hr')}>RH</span> et <span className="underline cursor-pointer font-bold hover:text-indigo-600" onClick={() => setActiveTab('ops')}>Carburant</span> impactent immédiatement votre TCR.
                      </p>
                    </div>
                 </div>
@@ -1244,26 +2522,51 @@ export default function App() {
                     </div>
                     <div className="grid grid-cols-4 gap-6 mb-8 pt-6 border-t border-slate-100">
                       <div className="flex flex-col gap-2">
-                        <span className="text-[10px] font-extrabold text-sleek-text-muted uppercase tracking-widest pl-1">Section Granite</span>
-                        <InputGroup label="Extraction (T)" value={year.extractionGranite} onChange={(v) => handleUpdateYear(idx, 'extractionGranite', v)} onBlur={() => pushToHistory(years)} suffix="T" />
-                        <InputGroup label="Revenus (DA)" value={year.caGranite} onChange={(v) => handleUpdateYear(idx, 'caGranite', v)} onBlur={() => pushToHistory(years)} suffix="DA" />
+                         <span className="text-[10px] font-extrabold text-sleek-text-muted uppercase tracking-widest pl-1">Section Granite</span>
+                         <InputGroup label="Extraction (T)" value={year.extractionGranite} onChange={(v) => handleUpdateYear(idx, 'extractionGranite', v)} suffix="T" />
+                         <InputGroup label="Revenus (DA)" value={year.caGranite} onChange={(v) => handleUpdateYear(idx, 'caGranite', v)} suffix="DA" />
                       </div>
                       <div className="flex flex-col gap-2">
-                        <span className="text-[10px] font-extrabold text-sleek-text-muted uppercase tracking-widest pl-1">Section Tuf</span>
-                        <InputGroup label="Extraction (T)" value={year.extractionTuf} onChange={(v) => handleUpdateYear(idx, 'extractionTuf', v)} onBlur={() => pushToHistory(years)} suffix="T" />
-                        <InputGroup label="Revenus (DA)" value={year.caTuf} onChange={(v) => handleUpdateYear(idx, 'caTuf', v)} onBlur={() => pushToHistory(years)} suffix="DA" />
+                         <span className="text-[10px] font-extrabold text-sleek-text-muted uppercase tracking-widest pl-1">Section Tuf</span>
+                         <InputGroup label="Extraction (T)" value={year.extractionTuf} onChange={(v) => handleUpdateYear(idx, 'extractionTuf', v)} suffix="T" />
+                         <InputGroup label="Revenus (DA)" value={year.caTuf} onChange={(v) => handleUpdateYear(idx, 'caTuf', v)} suffix="DA" />
                       </div>
                       <div className="flex flex-col gap-2">
-                        <span className="text-[10px] font-extrabold text-sleek-text-muted uppercase tracking-widest pl-1">Charges Directes</span>
-                        <InputGroup label="Matières (AUTO)" value={year.matieresFournitures} onChange={(v) => handleUpdateYear(idx, 'matieresFournitures', v)} onBlur={() => pushToHistory(years)} isAuto={true} />
-                        <InputGroup label="Services (AUTO)" value={year.services} onChange={(v) => handleUpdateYear(idx, 'services', v)} onBlur={() => pushToHistory(years)} isAuto={true} />
-                        <InputGroup label="Personnel (AUTO)" value={year.fraisPersonnel} onChange={(v) => handleUpdateYear(idx, 'fraisPersonnel', v)} onBlur={() => pushToHistory(years)} suffix="DA" isAuto={true} />
-                        <InputGroup label="Dot. Amortiss (AUTO)" value={year.dotationsAmortissements} onChange={(v) => handleUpdateYear(idx, 'dotationsAmortissements', v)} onBlur={() => pushToHistory(years)} suffix="DA" isAuto={true} />
+                         <span className="text-[10px] font-extrabold text-sleek-text-muted uppercase tracking-widest pl-1">Charges Directes</span>
+                         <InputGroup 
+                           label="Matières & Cons." 
+                           value={calculatedYears[idx].matieresFournitures} 
+                           onChange={(v) => handleUpdateYear(idx, 'matieresFournitures', v)} 
+                           isAuto={true} 
+                           formula="Fuel + Élec + Accessoires calculés + Saisie Manuelle"
+                         />
+                         <InputGroup 
+                           label="Services & Entret." 
+                           value={calculatedYears[idx].services} 
+                           onChange={(v) => handleUpdateYear(idx, 'services', v)} 
+                           isAuto={false}
+                         />
+                         <InputGroup 
+                           label="Masse Salariale" 
+                           value={calculatedYears[idx].fraisPersonnel} 
+                           onChange={(v) => handleUpdateYear(idx, 'fraisPersonnel', v)} 
+                           suffix="DA" 
+                           isAuto={true} 
+                           formula="Injection directe des RH + Saisie Manuelle additionnelle"
+                         />
+                         <InputGroup 
+                           label="Amortissements" 
+                           value={calculatedYears[idx].dotationsAmortissements} 
+                           onChange={(v) => handleUpdateYear(idx, 'dotationsAmortissements', v)} 
+                           suffix="DA" 
+                           isAuto={true} 
+                           formula="Injection directe des Amortissements + Saisie Manuelle"
+                         />
                       </div>
                       <div className="flex flex-col gap-2">
-                        <span className="text-[10px] font-extrabold text-sleek-text-muted uppercase tracking-widest pl-1">Charges Induites</span>
-                        <InputGroup label="Impôts & Taxes" value={year.impotsTaxes} onChange={(v) => handleUpdateYear(idx, 'impotsTaxes', v)} onBlur={() => pushToHistory(years)} />
-                        <InputGroup label="Frais Financiers" value={year.fraisFinanciers} onChange={(v) => handleUpdateYear(idx, 'fraisFinanciers', v)} onBlur={() => pushToHistory(years)} />
+                         <span className="text-[10px] font-extrabold text-sleek-text-muted uppercase tracking-widest pl-1">Charges Induites</span>
+                         <InputGroup label="Impôts & Taxes" value={year.impotsTaxes} onChange={(v) => handleUpdateYear(idx, 'impotsTaxes', v)} />
+                         <InputGroup label="Frais Financiers" value={year.fraisFinanciers} onChange={(v) => handleUpdateYear(idx, 'fraisFinanciers', v)} />
                       </div>
                     </div>
                   </div>
@@ -1445,151 +2748,6 @@ export default function App() {
               </motion.div>
             )}
 
-            {activeTab === 'history' && (
-              <motion.div 
-                key="history" 
-                initial={{ opacity: 0, x: 20 }} 
-                animate={{ opacity: 1, x: 0 }} 
-                exit={{ opacity: 0, x: -20 }} 
-                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-                className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-6"
-              >
-                  <div className="max-w-4xl mx-auto space-y-8">
-                     <div className="bg-white rounded-[2.5rem] p-10 border border-sleek-border shadow-xl">
-                        <h2 className="text-2xl font-black text-sleek-text-main mb-8 flex items-center gap-3 text-center justify-center">
-                          <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center text-amber-600 shadow-sm border border-amber-100">
-                             <History size={24} />
-                          </div>
-                          Historique des Simulations
-                        </h2>
-
-                        <div className="mb-8 relative max-w-lg mx-auto">
-                           <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                              <Search size={18} className="text-slate-400" />
-                           </div>
-                           <input 
-                              type="text"
-                              value={historySearchQuery}
-                              onChange={(e) => setHistorySearchQuery(e.target.value)}
-                              placeholder="Rechercher par libellé ou date (ex: 19 avr)..."
-                              className="w-full pl-12 pr-12 py-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold placeholder:text-slate-300 focus:ring-2 focus:ring-sleek-primary/20 focus:bg-white transition-all outline-none"
-                           />
-                           {historySearchQuery && (
-                              <button 
-                                 onClick={() => setHistorySearchQuery('')}
-                                 className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-300 hover:text-slate-500 transition-colors"
-                              >
-                                 <X size={18} />
-                              </button>
-                           )}
-                        </div>
-
-                        <div className="space-y-4">
-                           {filteredHistory.slice().reverse().map((snapshot, idx) => {
-                              // Calculate correct index in the original history array
-                              const originalIdx = history.findIndex(s => s.id === snapshot.id);
-                              const isCurrent = originalIdx === historyIndex;
-                              const date = new Date(snapshot.timestamp);
-                              return (
-                                 <motion.div 
-                                    key={snapshot.id}
-                                    initial={{ opacity: 0, y: 10 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    transition={{ delay: idx * 0.05 }}
-                                    className={cn(
-                                       "p-6 rounded-[2rem] border transition-all flex items-center justify-between group relative overflow-hidden",
-                                       isCurrent ? "bg-sleek-primary/5 border-sleek-primary/20 shadow-md" : "bg-slate-50 border-slate-100 hover:border-sleek-primary/30 hover:bg-white hover:shadow-lg"
-                                    )}
-                                 >
-                                    <div className="flex items-center gap-8 relative z-10">
-                                       <div className={cn(
-                                          "w-14 h-14 rounded-[1.5rem] flex items-center justify-center shadow-inner transition-colors",
-                                          isCurrent ? "bg-sleek-primary text-white" : "bg-white border border-slate-100 text-slate-400 group-hover:text-sleek-primary"
-                                       )}>
-                                          <Clock size={24} />
-                                       </div>
-                                       <div className="flex flex-col">
-                                          <div className="flex items-center gap-4">
-                                             <h4 className="text-base font-black text-sleek-text-main tracking-tight">{snapshot.label || `Simulation ${history.length - idx}`}</h4>
-                                             {isCurrent && (
-                                               <span className="px-3 py-1 bg-sleek-primary text-white text-[8px] font-black uppercase tracking-[2px] rounded-full shadow-lg shadow-sleek-primary/30">
-                                                 Version Actuelle
-                                               </span>
-                                             )}
-                                          </div>
-                                          <div className="flex items-center gap-4 mt-2">
-                                             <div className="flex items-center gap-1.5 text-slate-400">
-                                                <div className="w-1.5 h-1.5 rounded-full bg-slate-200"></div>
-                                                <span className="text-[11px] font-bold uppercase tracking-widest">
-                                                   {date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}
-                                                </span>
-                                             </div>
-                                             <div className="w-1 h-1 rounded-full bg-slate-300"></div>
-                                             <span className="text-[11px] font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
-                                                {date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                                             </span>
-                                          </div>
-                                       </div>
-                                    </div>
-
-                                    <div className="flex items-center gap-3 relative z-10">
-                                       <button 
-                                          onClick={() => {
-                                             setYears(JSON.parse(JSON.stringify(snapshot.data)));
-                                             setHistoryIndex(history.length - 1 - idx);
-                                          }}
-                                          disabled={isCurrent}
-                                          className="flex items-center gap-2 px-6 py-3 bg-white border border-slate-200 rounded-2xl text-[10px] font-black uppercase tracking-[2px] text-sleek-text-main hover:border-sleek-primary hover:text-sleek-primary hover:shadow-xl transition-all disabled:opacity-0 disabled:pointer-events-none active:scale-95"
-                                       >
-                                          Restaurer cette version
-                                       </button>
-                                       <button 
-                                          onClick={() => {
-                                             if(window.confirm("Supprimer cette simulation de l'historique ?")) {
-                                                const newHistory = history.filter(s => s.id !== snapshot.id);
-                                                setHistory(newHistory);
-                                                // Adjust historyIndex if needed
-                                                if (originalIdx === historyIndex) {
-                                                   setHistoryIndex(-1);
-                                                } else if (originalIdx < historyIndex) {
-                                                   setHistoryIndex(prev => prev - 1);
-                                                }
-                                             }
-                                          }}
-                                          className="p-3 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all active:scale-90"
-                                          title="Supprimer cette version"
-                                       >
-                                          <Trash2 size={20} />
-                                       </button>
-                                    </div>
-                                    
-                                    {isCurrent && (
-                                      <div className="absolute top-0 right-0 w-32 h-32 bg-sleek-primary/5 rounded-full -mr-16 -mt-16 blur-3xl"></div>
-                                    )}
-                                 </motion.div>
-                              );
-                           })}
-
-                           {filteredHistory.length === 0 && (
-                              <div className="p-32 text-center flex flex-col items-center gap-6">
-                                 <div className="w-24 h-24 bg-slate-50 rounded-[2rem] flex items-center justify-center text-slate-200 shadow-inner">
-                                    <Search size={48} strokeWidth={1.5} />
-                                 </div>
-                                 <div className="space-y-2">
-                                    <p className="text-lg font-bold text-slate-400">Aucun résultat trouvé</p>
-                                    <p className="text-xs text-slate-300 font-medium max-w-sm mx-auto">
-                                       {history.length === 0 
-                                          ? "Sauvegardez vos simulations depuis l'onglet \"Saisie TCR\" pour enregistrer des versions de votre étude."
-                                          : `Aucune simulation ne correspond à "${historySearchQuery}".`}
-                                    </p>
-                                 </div>
-                              </div>
-                           )}
-                        </div>
-                     </div>
-                  </div>
-              </motion.div>
-            )}
 
             {activeTab === 'help' && (
               <motion.div 
@@ -1615,6 +2773,18 @@ export default function App() {
                         title="Comptabilité Analytique Multi-Produits" 
                         description="L'application sépare les charges directes (affectées spécifiquement au Granite ou au Tuf) et répartit les charges communes (Administration, Carburant commun, Maintenance commune, etc.) proportionnellement au tonnage extrait annuel de chaque matériau pour garantir un coût de revient mathématiquement exact."
                         color="bg-blue-50"
+                      />
+                      <HelpCard 
+                        icon={<Mountain size={20} className="text-sleek-primary" />}
+                        title="Dimensionnement de Production" 
+                        description="Planification stratégique basée sur un objectif (Vcible). L'outil calcule le volume Tout-Venant (V_amont) nécessaire en intégrant les pertes d'extraction (η1) et de retaille (η2), identifiant ainsi le nombre de machines (N_A, N_B) pour éviter les goulots d'étranglement."
+                        color="bg-blue-50"
+                      />
+                      <HelpCard 
+                        icon={<Zap size={20} className="text-sleek-primary" />}
+                        title="Calculateur de Consommables" 
+                        description="Outil spécialisé pour le Fil Diamanté permettant d'estimer la quantité annuelle selon la vitesse de sciage (Vs), le coefficient de consommation (Cfu) et le régime de travail, avec injection directe dans les coûts accessoires."
+                        color="bg-indigo-50"
                       />
                       <HelpCard 
                         icon={<HardDrive size={20} className="text-sleek-accent-red" />}

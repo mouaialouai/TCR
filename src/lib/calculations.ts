@@ -8,7 +8,11 @@ import {
   HRConfig,
   OperationalMachine,
   OperationalConfig,
-  Allocation
+  Allocation,
+  ElectricityLine,
+  ElectricityConfig,
+  AccessoryConfig,
+  AccessoryItem
 } from '../types';
 
 export interface SplitCosts {
@@ -17,25 +21,48 @@ export interface SplitCosts {
   common: number[];
 }
 
+export const getElectricityCosts = (lines: ElectricityLine[], config: ElectricityConfig, opConfig: OperationalConfig): SplitCosts => {
+  const costs = Array(10).fill(0);
+  
+  const annualEnergy = lines.reduce((acc, l) => {
+    const pLine = l.powerKw * l.count * l.utilizationCoef;
+    return acc + (pLine * l.hoursPerDay * l.workDaysPerYear);
+  }, 0);
+
+  const annualLitres = annualEnergy * config.specificConsumption;
+  const y1Cost = annualLitres * opConfig.fuelPrice;
+  
+  costs[0] = y1Cost;
+  for (let i = 1; i < 10; i++) {
+    costs[i] = costs[i - 1] * (1 + opConfig.annualInflationRate / 100);
+  }
+  
+  return { granite: Array(10).fill(0), tuf: Array(10).fill(0), common: costs };
+};
+
 export const getOperationalCosts = (machines: OperationalMachine[], config: OperationalConfig): { fuel: SplitCosts, maintenance: SplitCosts } => {
   const empty = () => ({ granite: Array(10).fill(0), tuf: Array(10).fill(0), common: Array(10).fill(0) });
   const fuel = empty();
   const maintenance = empty();
 
   machines.forEach(m => {
-    const y1Fuel = m.hourlyConsumption * m.hoursPerDay * config.workDaysPerYear * config.fuelPrice;
-    const y1Maint = m.assetValue * (m.maintenanceRate / 100);
+    // Calcul: Conso_Lh (L/h par type de machine) = kW * (L/kWh) * Coef. Utilisation
+    const consoLh = m.powerKw * m.consumptionRate * m.utilizationCoef;
+    // ConsoTotale_Lh = Conso_Lh * Nombre de machines
+    const consoTotaleLh = consoLh * m.count;
+    // Litres/an = ConsoTotale_Lh * Heures/jour_machine * Jours/an_machine
+    const annualLitres = consoTotaleLh * (m.hoursPerDay ?? config.hoursPerDay) * (m.workDaysPerYear ?? config.workDaysPerYear);
+    // CoutCarburantAnnuel = Litres/an * Prix du litre
+    const y1Fuel = annualLitres * config.fuelPrice;
+    
     const alloc = m.allocation.toLowerCase() as keyof SplitCosts;
-
     fuel[alloc][0] += y1Fuel;
-    maintenance[alloc][0] += y1Maint;
   });
 
   for (let i = 1; i < 10; i++) {
     ['granite', 'tuf', 'common'].forEach(k => {
       const key = k as keyof SplitCosts;
       fuel[key][i] = fuel[key][i - 1] * (1 + config.annualInflationRate / 100);
-      maintenance[key][i] = maintenance[key][i - 1] * (1 + config.annualInflationRate / 100);
     });
   }
 
@@ -89,6 +116,25 @@ export const getAmortizationSchedule = (equipments: Equipment[]): { rows: Amorti
   return { rows, annualTotals };
 };
 
+export const getAccessoryCosts = (config: AccessoryConfig, inflationRate: number): SplitCosts => {
+  const costs = { granite: Array(10).fill(0), tuf: Array(10).fill(0), common: Array(10).fill(0) };
+
+  config.items.forEach(item => {
+    const y1Total = item.qtyPerYear * item.unitPrice;
+    const alloc = item.allocation.toLowerCase() as keyof SplitCosts;
+    costs[alloc][0] += y1Total;
+  });
+
+  for (let i = 1; i < 10; i++) {
+    ['granite', 'tuf', 'common'].forEach(k => {
+      const key = k as keyof SplitCosts;
+      costs[key][i] = costs[key][i - 1] * (1 + inflationRate / 100);
+    });
+  }
+
+  return costs;
+};
+
 export const calculateYear = (
   data: AnnualData, 
   ibmRate: number,
@@ -96,49 +142,48 @@ export const calculateYear = (
   maintSplit: SplitCosts,
   hrSplit: SplitCosts,
   amortSplit: SplitCosts,
+  electricitySplit: SplitCosts,
+  accessorySplit: SplitCosts,
   idx: number,
-  // Other potential indirect costs like taxes and finances might need splitting too, 
-  // but usually they are "Common" unless specified.
 ): FullYearData => {
   const caGlobal = (data.caGranite || 0) + (data.caTuf || 0);
   
-  // Total direct + indirect calculation for the Global TCR
-  const subtotal1 = data.matieresFournitures + data.services;
-  const subtotal2 = data.fraisPersonnel + data.impotsTaxes + data.fraisFinanciers + data.dotationsAmortissements;
+  // Intégration Automatique des coûts calculés dans le TCR
+  // On additionne la partie saisie manuellement avec la partie automatisée
+  const automatedFuel = fuelSplit.granite[idx] + fuelSplit.tuf[idx] + fuelSplit.common[idx];
+  const automatedHR = hrSplit.granite[idx] + hrSplit.tuf[idx] + hrSplit.common[idx];
+  const automatedAmort = amortSplit.granite[idx] + amortSplit.tuf[idx] + amortSplit.common[idx];
+  const automatedElectricity = electricitySplit.granite[idx] + electricitySplit.tuf[idx] + electricitySplit.common[idx];
+  const automatedAccessories = accessorySplit.granite[idx] + accessorySplit.tuf[idx] + accessorySplit.common[idx];
+
+  const finalMatieres = data.matieresFournitures + automatedFuel + automatedElectricity + automatedAccessories;
+  const finalHR = data.fraisPersonnel + automatedHR;
+  const finalAmort = data.dotationsAmortissements + automatedAmort;
+
+  const subtotal1 = finalMatieres + data.services;
+  const subtotal2 = finalHR + data.impotsTaxes + data.fraisFinanciers + finalAmort;
   const valeurAjoutee = caGlobal - subtotal1;
   const resultatExploitation = valeurAjoutee - subtotal2;
   const ibm = Math.max(0, resultatExploitation * ibmRate);
   const resultatNet = resultatExploitation - ibm;
-  const fnt = resultatNet + data.dotationsAmortissements;
+  const fnt = resultatNet + finalAmort;
 
   // ANALYTIC CALCULATION for Prix de Revient
-  // 1. Identify Direct Costs per product from models
   const directGranite = 
     fuelSplit.granite[idx] + 
-    maintSplit.granite[idx] + 
     hrSplit.granite[idx] + 
-    amortSplit.granite[idx];
+    amortSplit.granite[idx] +
+    accessorySplit.granite[idx];
 
   const directTuf = 
     fuelSplit.tuf[idx] + 
-    maintSplit.tuf[idx] + 
     hrSplit.tuf[idx] + 
-    amortSplit.tuf[idx];
+    amortSplit.tuf[idx] +
+    accessorySplit.tuf[idx];
 
-  // 2. Determine the Common Pool
-  // We take the total expenses from the TCR and subtract identified direct costs.
-  // This ensures that any manual entry or "Common" tagged cost is correctly pooled and allocated.
-  const totalExpenses = 
-    data.matieresFournitures + 
-    data.services + 
-    data.fraisPersonnel + 
-    data.impotsTaxes + 
-    data.fraisFinanciers + 
-    data.dotationsAmortissements;
-
+  const totalExpenses = subtotal1 + subtotal2;
   const commonPool = Math.max(0, totalExpenses - directGranite - directTuf);
 
-  // 3. Proportional Allocation based on Tonnages
   const totalTonnage = (data.extractionGranite || 0) + (data.extractionTuf || 0) || 1;
   const graniteRatio = (data.extractionGranite || 0) / totalTonnage;
   const tufRatio = (data.extractionTuf || 0) / totalTonnage;
@@ -151,6 +196,9 @@ export const calculateYear = (
 
   return {
     ...data,
+    matieresFournitures: finalMatieres,
+    fraisPersonnel: finalHR,
+    dotationsAmortissements: finalAmort,
     caGlobal,
     subtotal1,
     valeurAjoutee,

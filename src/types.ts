@@ -17,17 +17,60 @@ export interface HRConfig {
 export interface OperationalConfig {
   fuelPrice: number;
   workDaysPerYear: number;
+  hoursPerDay: number;
   annualInflationRate: number;
+}
+
+export interface ElectricityLine {
+  id: string;
+  designation: string;
+  powerKw: number;
+  count: number;
+  utilizationCoef: number;
+  workDaysPerYear: number;
+  hoursPerDay: number;
+}
+
+export interface ElectricityConfig {
+  cosPhi: number;
+  kvaPerGroup: number;
+  specificConsumption: number;
+  workDaysPerYear: number;
+  hoursPerDay: number;
+}
+
+export type AccessoryCalculationMode = 'direct' | 'calculated';
+
+export interface AccessoryItem {
+  id: string;
+  designation: string;
+  qtyPerYear: number;
+  unitPrice: number;
+  unit: string;
+  allocation: Allocation;
+  calculationMode?: AccessoryCalculationMode;
+  // Calculation parameters
+  vs?: number; // m2/h
+  cfu?: number; // m/m2
+  hoursPerDay?: number;
+  daysPerYear?: number;
+  machineCount?: number;
+}
+
+export interface AccessoryConfig {
+  items: AccessoryItem[];
 }
 
 export interface OperationalMachine {
   id: string;
   designation: string;
-  hourlyConsumption: number;
-  hoursPerDay: number;
-  assetValue: number;
-  maintenanceRate: number;
+  powerKw: number;
+  count: number;
+  consumptionRate: number;
+  utilizationCoef: number;
   allocation: Allocation;
+  workDaysPerYear: number;
+  hoursPerDay: number;
 }
 
 export type InvestmentCategory = 
@@ -85,4 +128,37 @@ export interface CalculationSnapshot {
   timestamp: string;
   data: AnnualData[];
   label?: string;
+}
+
+export interface ProductionParams {
+  l: number;
+  w: number;
+  h: number;
+}
+
+export interface MachineProductivityParams {
+  vs: number;
+  hEq: number;
+  hoursPerDay: number;
+  daysPerYear: number;
+  utilizationRate: number;
+}
+
+export interface ProductionStep {
+  name: string;
+  dimensions: ProductionParams;
+  productivity: MachineProductivityParams;
+}
+
+export interface ProductionDimensioning {
+  horizon: '1y' | '10y';
+  targetMode: 'constant' | 'variable';
+  vTargetConstant: number;
+  vTargetVariable: number[];
+  yieldsConstant: { eta1: number; eta2: number };
+  yieldsVariable: { eta1: number[]; eta2: number[] };
+  steps: {
+    extraction: ProductionStep;
+    retaille: ProductionStep;
+  };
 }
