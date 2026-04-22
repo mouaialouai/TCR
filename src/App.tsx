@@ -574,10 +574,13 @@ export default function App() {
       "TOTAL GLOBAL"
     ];
 
-    const formatVal = (v: number) => {
-      if (v === undefined || v === null || isNaN(v)) return "0";
-      // Round and format with comma for French Excel
-      return Math.round(v).toString().replace(".", ",");
+    const formatExcel = (v: any) => {
+      if (v === undefined || v === null || v === "") return "0";
+      if (typeof v === 'number') {
+        if (isNaN(v)) return "0";
+        return v.toString().replace(".", ",");
+      }
+      return String(v);
     };
 
     const rows = [
@@ -603,8 +606,8 @@ export default function App() {
 
     const csvContent = BOM + [
       headers.join(DELIMITER),
-      ...rows.map(row => row.map(val => typeof val === 'number' ? formatVal(val) : val).join(DELIMITER))
-    ].join("\n");
+      ...rows.map(row => row.map(formatExcel).join(DELIMITER))
+    ].join("\r\n");
 
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
@@ -631,23 +634,26 @@ export default function App() {
       {/* Sidebar - Sleek Theme */}
       <aside className="w-64 bg-sleek-sidebar text-white flex flex-col shrink-0 overflow-y-auto shadow-2xl z-50">
         <div className="p-8 pb-10 flex items-center gap-3">
-          <div className="w-8 h-8 bg-sleek-primary rounded-lg flex items-center justify-center shadow-lg shadow-sleek-primary/20">
-            <Calculator size={18} />
+          <div className="w-10 h-10 bg-sleek-primary rounded-xl flex items-center justify-center shadow-lg shadow-sleek-primary/20">
+            <Calculator size={22} className="text-white" />
           </div>
-          <span className="font-extrabold text-xl tracking-tight">GraniteApp</span>
+          <svg width="100" height="40" viewBox="0 0 100 40" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-10 w-auto filter drop-shadow-sm">
+            <text x="0" y="32" fill="white" fontSize="34" fontWeight="900" fontFamily="Inter, sans-serif" style={{ letterSpacing: '-0.05em' }}>TCR</text>
+            <rect x="0" y="36" width="24" height="4" fill="#3b82f6" rx="2" />
+          </svg>
         </div>
 
         <nav className="flex-1 space-y-1">
             <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={18} />} label="Dashboard" />
             <NavItem active={activeTab === 'prod'} onClick={() => setActiveTab('prod')} icon={<Mountain size={18} />} label="Production" />
             <NavItem active={activeTab === 'invest'} onClick={() => setActiveTab('invest')} icon={<HardDrive size={18} />} label="Investissements" />
-            <NavItem active={activeTab === 'hr'} onClick={() => setActiveTab('hr')} icon={<Users size={18} />} label="Ressources Humaines" />
+            <NavItem active={activeTab === 'hr'} onClick={() => setActiveTab('hr')} icon={<Users size={18} />} label="Personnel (RH)" />
             <NavItem active={activeTab === 'ops'} onClick={() => setActiveTab('ops')} icon={<Fuel size={18} />} label="Carburant & Maint." />
             <NavItem active={activeTab === 'elec'} onClick={() => setActiveTab('elec')} icon={<Zap size={18} />} label="Électricité" />
             <NavItem active={activeTab === 'acc'} onClick={() => setActiveTab('acc')} icon={<PlusCircle size={18} />} label="Coûts Accessoires" />
             <NavItem active={activeTab === 'edit'} onClick={() => setActiveTab('edit')} icon={<Edit3 size={18} />} label="Saisie TCR" />
             <NavItem active={activeTab === 'table'} onClick={() => setActiveTab('table')} icon={<TableIcon size={18} />} label="Rapports TCR" />
-            <NavItem active={activeTab === 'charts'} onClick={() => setActiveTab('charts')} icon={<Activity size={18} />} label="Analyses Graphiques" />
+            <NavItem active={activeTab === 'charts'} onClick={() => setActiveTab('charts')} icon={<Activity size={18} />} label="Analyses & Graphes" />
             <NavItem active={activeTab === 'help'} onClick={() => setActiveTab('help')} icon={<BookOpen size={18} />} label="Aide & Manuel" />
             <NavItem active={activeTab === 'code'} onClick={() => setActiveTab('code')} icon={<Smartphone size={18} />} label="Export Android" />
             <NavItem active={activeTab === 'about'} onClick={() => setActiveTab('about')} icon={<Info size={18} />} label="À propos" />
@@ -951,6 +957,7 @@ export default function App() {
                           onChange={(v) => setProductionConfig({...productionConfig, vTargetConstant: Number(v)})}
                           type="number"
                           helper="Volume final de blocs marchands à produire par an"
+                          formula="Objectif final de vente en m³ de blocs marchands après toutes les étapes de retaille."
                         />
                       </div>
                     </div>
@@ -979,6 +986,7 @@ export default function App() {
                                 setProductionConfig(newConfig);
                               }}
                               type="number"
+                              formula="Longueur du bloc brut extrait directement en carrière (gros bloc)."
                             />
                             <InputGroupVertical 
                               label="l (m)" value={productionConfig.steps.extraction.dimensions.w.toString()} 
@@ -988,6 +996,7 @@ export default function App() {
                                 setProductionConfig(newConfig);
                               }}
                               type="number"
+                              formula="Largeur du bloc brut extrait directement en carrière (gros bloc)."
                             />
                             <InputGroupVertical 
                               label="h (m)" value={productionConfig.steps.extraction.dimensions.h.toString()} 
@@ -997,6 +1006,7 @@ export default function App() {
                                 setProductionConfig(newConfig);
                               }}
                               type="number"
+                              formula="Hauteur du bloc brut extrait directement en carrière (gros bloc)."
                             />
                           </div>
                         </div>
@@ -1018,6 +1028,7 @@ export default function App() {
                                 setProductionConfig(newConfig);
                               }}
                               type="number"
+                              formula="Longueur finale du bloc marchand (produit fini exportable)."
                             />
                             <InputGroupVertical 
                               label="l (m)" value={productionConfig.steps.retaille.dimensions.w.toString()} 
@@ -1027,6 +1038,7 @@ export default function App() {
                                 setProductionConfig(newConfig);
                               }}
                               type="number"
+                              formula="Largeur finale du bloc marchand (produit fini exportable)."
                             />
                             <InputGroupVertical 
                               label="h (m)" value={productionConfig.steps.retaille.dimensions.h.toString()} 
@@ -1036,6 +1048,7 @@ export default function App() {
                                 setProductionConfig(newConfig);
                               }}
                               type="number"
+                              formula="Hauteur finale du bloc marchand (produit fini exportable)."
                             />
                           </div>
                         </div>
@@ -1161,30 +1174,30 @@ export default function App() {
                              const newConfig = {...productionConfig};
                              newConfig.steps.extraction.productivity.vs = Number(v);
                              setProductionConfig(newConfig);
-                           }} type="number" />
+                           }} type="number" formula="Vitesse de sciage nette du fil diamanté en mètres carrés par heure (vitesse d'avancement)." />
                            <InputGroupVertical label="h_eq (m)" value={productionConfig.steps.extraction.productivity.hEq.toString()} onChange={(v) => {
                              const newConfig = {...productionConfig};
                              newConfig.steps.extraction.productivity.hEq = Number(v);
                              setProductionConfig(newConfig);
-                           }} type="number" />
+                           }} type="number" formula="Hauteur équivalente moyenne de coupe. Utilisée pour convertir la surface sciée en volume extrait." />
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                            <InputGroupVertical label="H (h/j)" value={productionConfig.steps.extraction.productivity.hoursPerDay.toString()} onChange={(v) => {
                              const newConfig = {...productionConfig};
                              newConfig.steps.extraction.productivity.hoursPerDay = Number(v);
                              setProductionConfig(newConfig);
-                           }} type="number" />
+                           }} type="number" formula="Nombre moyen d'heures de fonctionnement effectif de la machine par jour (temps de sciage pur)." />
                            <InputGroupVertical label="J (j/an)" value={productionConfig.steps.extraction.productivity.daysPerYear.toString()} onChange={(v) => {
                              const newConfig = {...productionConfig};
                              newConfig.steps.extraction.productivity.daysPerYear = Number(v);
                              setProductionConfig(newConfig);
-                           }} type="number" />
+                           }} type="number" formula="Nombre de jours d'exploitation de la carrière sur l'année." />
                         </div>
                         <InputGroupVertical label="Taux d'Utilisation U" value={productionConfig.steps.extraction.productivity.utilizationRate.toString()} onChange={(v) => {
                           const newConfig = {...productionConfig};
                           newConfig.steps.extraction.productivity.utilizationRate = Number(v);
                           setProductionConfig(newConfig);
-                        }} type="number" helper="Valeur entre 0 et 1 (Défaut 1)" />
+                        }} type="number" helper="Valeur entre 0 et 1 (Défaut 1)" formula="Ratio de disponibilité réelle de la machine (Maintenance, arrêts, déplacements). 0.8 signifie 80% du temps disponible." />
                       </div>
 
                       {/* Retaille Machine */}
@@ -1192,35 +1205,35 @@ export default function App() {
                         <h3 className="text-sm font-bold text-sleek-text-main flex items-center gap-2 border-b border-slate-50 pb-4 uppercase tracking-tighter">
                           <Settings size={16} className="text-indigo-600" /> Capacité Retaille
                         </h3>
-                        <div className="grid grid-cols-2 gap-4">
+                         <div className="grid grid-cols-2 gap-4">
                            <InputGroupVertical label="Vs (m²/h)" value={productionConfig.steps.retaille.productivity.vs.toString()} onChange={(v) => {
                              const newConfig = {...productionConfig};
                              newConfig.steps.retaille.productivity.vs = Number(v);
                              setProductionConfig(newConfig);
-                           }} type="number" />
+                           }} type="number" formula="Vitesse de sciage nette pour la mise au format des blocs marchands." />
                            <InputGroupVertical label="h_eq (m)" value={productionConfig.steps.retaille.productivity.hEq.toString()} onChange={(v) => {
                              const newConfig = {...productionConfig};
                              newConfig.steps.retaille.productivity.hEq = Number(v);
                              setProductionConfig(newConfig);
-                           }} type="number" />
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
+                           }} type="number" formula="Hauteur de coupe moyenne lors de l'équarrissage des blocs." />
+                         </div>
+                         <div className="grid grid-cols-2 gap-4">
                            <InputGroupVertical label="H (h/j)" value={productionConfig.steps.retaille.productivity.hoursPerDay.toString()} onChange={(v) => {
                              const newConfig = {...productionConfig};
                              newConfig.steps.retaille.productivity.hoursPerDay = Number(v);
                              setProductionConfig(newConfig);
-                           }} type="number" />
+                           }} type="number" formula="Temps de fonctionnement quotidien de la machine de retaille." />
                            <InputGroupVertical label="J (j/an)" value={productionConfig.steps.retaille.productivity.daysPerYear.toString()} onChange={(v) => {
                              const newConfig = {...productionConfig};
                              newConfig.steps.retaille.productivity.daysPerYear = Number(v);
                              setProductionConfig(newConfig);
-                           }} type="number" />
-                        </div>
-                        <InputGroupVertical label="Taux d'Utilisation U" value={productionConfig.steps.retaille.productivity.utilizationRate.toString()} onChange={(v) => {
-                          const newConfig = {...productionConfig};
-                          newConfig.steps.retaille.productivity.utilizationRate = Number(v);
-                          setProductionConfig(newConfig);
-                        }} type="number" helper="Valeur entre 0 et 1 (Défaut 1)" />
+                           }} type="number" formula="Nombre de jours de travail par an." />
+                         </div>
+                         <InputGroupVertical label="Taux d'Utilisation U" value={productionConfig.steps.retaille.productivity.utilizationRate.toString()} onChange={(v) => {
+                           const newConfig = {...productionConfig};
+                           newConfig.steps.retaille.productivity.utilizationRate = Number(v);
+                           setProductionConfig(newConfig);
+                         }} type="number" helper="Valeur entre 0 et 1 (Défaut 1)" formula="Efficience opérationnelle de la machine (pannes, changements de fil, etc.)." />
                       </div>
                     </div>
 
@@ -1559,12 +1572,14 @@ export default function App() {
                              value={((hrConfig.socialChargesRate ?? 0) * 100).toString()} 
                              onChange={v => setHrConfig({...hrConfig, socialChargesRate: Number(v)/100})} 
                              type="number" 
+                             formula="Taux des charges patronales (CNAS, etc.) calculé sur le salaire net + primes pour obtenir le coût employeur."
                            />
                            <InputGroupVertical 
                              label="Inflation (%)" 
                              value={((hrConfig.annualIncreaseRate ?? 0) * 100).toString()} 
                              onChange={v => setHrConfig({...hrConfig, annualIncreaseRate: Number(v)/100})} 
                              type="number" 
+                             formula="Taux d'augmentation annuel prévu des salaires pour compenser l'inflation du coût de la vie."
                            />
                         </div>
                       </div>
@@ -1895,10 +1910,10 @@ export default function App() {
                         <div className="space-y-4">
                            <InputGroupVertical label="Désignation" value={newElecName} onChange={setNewElecName} />
                            <div className="grid grid-cols-2 gap-4">
-                              <InputGroupVertical label="Puissance Puis. (kW)" value={newElecPower} onChange={setNewElecPower} type="number" />
-                              <InputGroupVertical label="Nombre" value={newElecCount} onChange={setNewElecCount} type="number" />
+                              <InputGroupVertical label="Puissance Puis. (kW)" value={newElecPower} onChange={setNewElecPower} type="number" formula="Puissance nominale de l'équipement électrique (moteurs, pompes, éclairage, etc.)." />
+                              <InputGroupVertical label="Nombre" value={newElecCount} onChange={setNewElecCount} type="number" formula="Nombre d'équipements identiques sur ce poste." />
                            </div>
-                           <InputGroupVertical label="Coef Utilisation (0..1)" value={newElecUtilCoef} onChange={setNewElecUtilCoef} type="number" />
+                           <InputGroupVertical label="Coef Utilisation (0..1)" value={newElecUtilCoef} onChange={setNewElecUtilCoef} type="number" formula="Facteur de charge moyen représentant l'utilisation réelle de la puissance nominale." />
                         </div>
                       </div>
                       <button onClick={addElectricityLine} className="w-full py-3 bg-sleek-primary text-white rounded-xl font-bold text-sm tracking-wide mt-2 shadow-lg shadow-sleek-primary/10 transition-all hover:scale-[1.02] active:scale-[0.98]">
@@ -2072,12 +2087,12 @@ export default function App() {
                                <InputGroupVertical label="Désignation de la machine / Poste" value={dmDesignation} onChange={setDmDesignation} />
                             </div>
                             <div className="grid grid-cols-2 gap-6">
-                               <InputGroupVertical label="Vs : Vitesse de sciage (m²/h)" value={dmVs} onChange={setDmVs} type="number" />
-                               <InputGroupVertical label="Cfu : Conso. unitaire (m/m²)" value={dmCfu} onChange={setDmCfu} type="number" />
+                               <InputGroupVertical label="Vs : Vitesse de sciage (m²/h)" value={dmVs} onChange={setDmVs} type="number" formula="Vitesse de coupe nette de la machine sur le matériau concerné." />
+                               <InputGroupVertical label="Cfu : Conso. unitaire (m/m²)" value={dmCfu} onChange={setDmCfu} type="number" formula="Coefficient d'usure du fil diamanté (longueur de fil perdue par surface découpée)." />
                             </div>
                             <div className="grid grid-cols-2 gap-6">
-                               <InputGroupVertical label="Heures / jour (h/j)" value={dmHj} onChange={setDmHj} type="number" />
-                               <InputGroupVertical label="Jours / an (j/an)" value={dmJa} onChange={setDmJa} type="number" />
+                               <InputGroupVertical label="Heures / jour (h/j)" value={dmHj} onChange={setDmHj} type="number" formula="Temps de fonctionnement quotidien effectif." />
+                               <InputGroupVertical label="Jours / an (j/an)" value={dmJa} onChange={setDmJa} type="number" formula="Nombre de jours ouvrables sur l'année d'exploitation." />
                             </div>
                             <div className="grid grid-cols-2 gap-6 items-end">
                                <InputGroupVertical label="Nombre de machines (N)" value={dmN} onChange={setDmN} type="number" />
@@ -2986,10 +3001,14 @@ function FormulaTooltip({ formula }: { formula: string }) {
   );
 }
 
-function InputGroupVertical({ label, value, onChange, onBlur, type = "text", helper, readOnly }: { label: string, value: string, onChange: (v: string) => void, onBlur?: () => void, type?: string, helper?: string, readOnly?: boolean }) {
+function InputGroupVertical({ label, value, onChange, onBlur, type = "text", helper, readOnly, formula }: { label: string, value: string, onChange: (v: string) => void, onBlur?: () => void, type?: string, helper?: string, readOnly?: boolean, formula?: string }) {
   return (
-    <div className={cn("space-y-1.5 min-w-0", readOnly && "opacity-50 grayscale select-none")}>
-      <label className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-70 px-1">{label}</label>
+    <div className={cn("space-y-1.5 min-w-0 group relative", readOnly && "opacity-50 grayscale select-none")}>
+      <label className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-70 px-1 flex items-center gap-1.5 cursor-help">
+        {label}
+        {formula && <Info size={10} className="opacity-40" />}
+      </label>
+      {formula && <FormulaTooltip formula={formula} />}
       <input 
         type={type} 
         value={value} 
