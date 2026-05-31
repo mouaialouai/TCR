@@ -73,7 +73,9 @@ export const getHRCosts = (roles: EmployeeRole[], config: HRConfig): SplitCosts 
   const costs = { granite: Array(10).fill(0), tuf: Array(10).fill(0), common: Array(10).fill(0) };
 
   roles.forEach(role => {
-    const baseAnnual = role.count * role.monthlySalary * config.paidMonths;
+    const expRate = config.experienceRate !== undefined ? config.experienceRate : 0.06;
+    const monthlyWithExp = role.hasExperience ? role.monthlySalary * (1 + expRate) : role.monthlySalary;
+    const baseAnnual = role.count * monthlyWithExp * config.paidMonths;
     const socialCharges = baseAnnual * config.socialChargesRate;
     const y1Total = baseAnnual + socialCharges;
     const alloc = role.allocation.toLowerCase() as keyof SplitCosts;

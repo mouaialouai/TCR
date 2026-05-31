@@ -221,14 +221,26 @@ export default function App() {
   const [years, setYears] = useState<AnnualData[]>(initialState?.years ?? INITIAL_YEARS);
   const [equipments, setEquipments] = useState<Equipment[]>(initialState?.equipments ?? INITIAL_EQUIPMENTS);
   const [ibmRate, setIbmRate] = useState<number>(initialState?.ibmRate ?? 0.12);
+  const [ibmRateInput, setIbmRateInput] = useState<string>(((initialState?.ibmRate ?? 0.12) * 100).toString());
 
   // HR State
   const [roles, setRoles] = useState<EmployeeRole[]>(initialState?.roles ?? []);
-  const [hrConfig, setHrConfig] = useState<HRConfig>(initialState?.hrConfig ?? {
-    socialChargesRate: 0.26,
-    annualIncreaseRate: 0.03,
-    paidMonths: 12
+  const [hrConfig, setHrConfig] = useState<HRConfig>(() => {
+    const base = initialState?.hrConfig ?? {
+      socialChargesRate: 0.26,
+      annualIncreaseRate: 0.03,
+      paidMonths: 12,
+      experienceRate: 0.06
+    };
+    return {
+      experienceRate: 0.06,
+      ...base
+    };
   });
+
+  const [socialChargesInput, setSocialChargesInput] = useState<string>(((initialState?.hrConfig?.socialChargesRate ?? 0.26) * 100).toString());
+  const [annualIncreaseInput, setAnnualIncreaseInput] = useState<string>(((initialState?.hrConfig?.annualIncreaseRate ?? 0.03) * 100).toString());
+  const [experienceRateInput, setExperienceRateInput] = useState<string>(((initialState?.hrConfig?.experienceRate ?? 0.06) * 100).toString());
 
   // Operational State
   const [machines, setMachines] = useState<OperationalMachine[]>(() => {
@@ -245,6 +257,7 @@ export default function App() {
     hoursPerDay: 8,
     annualInflationRate: 3
   });
+  const [annualInflationInput, setAnnualInflationInput] = useState<string>((initialState?.opConfig?.annualInflationRate ?? 3).toString());
 
   // Electricity State
   const [electricityLines, setElectricityLines] = useState<ElectricityLine[]>(() => {
@@ -332,9 +345,10 @@ export default function App() {
       };
       window.localStorage.setItem(SAVE_KEY, JSON.stringify(stateToSave));
       
-      // Add to history
+      // Add to history safely
       setHistory(prev => {
-        const newHistory = [stateToSave, ...(prev || [])];
+        const currentHistory = Array.isArray(prev) ? prev : [];
+        const newHistory = [stateToSave, ...currentHistory];
         return newHistory.slice(0, 50); // Keep last 50
       });
       
@@ -348,28 +362,37 @@ export default function App() {
   const restoreFromHistory = (data: any) => {
     if (!data) return;
     try {
+      // 1. Instantly write to SAVE_KEY so it's persisted on refresh / reload
+      window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+
+      // 2. Safely apply to React state variables
       setUserNotes(data.userNotes ?? '');
       setYears(data.years ?? INITIAL_YEARS);
       setEquipments(data.equipments ?? INITIAL_EQUIPMENTS);
       setRoles(data.roles ?? []);
       setHrConfig(data.hrConfig ?? { socialChargesRate: 0.26, annualIncreaseRate: 0.03, paidMonths: 12 });
+      setSocialChargesInput(((data.hrConfig?.socialChargesRate ?? 0.26) * 100).toString());
+      setAnnualIncreaseInput(((data.hrConfig?.annualIncreaseRate ?? 0.03) * 100).toString());
+      setExperienceRateInput(((data.hrConfig?.experienceRate ?? 0.06) * 100).toString());
       setMachines(data.machines ?? []);
       setOpConfig(data.opConfig ?? { fuelPrice: 29, workDaysPerYear: 250, hoursPerDay: 8, annualInflationRate: 3 });
+      setAnnualInflationInput((data.opConfig?.annualInflationRate ?? 3).toString());
       setElectricityLines(data.electricityLines ?? []);
       setElectricityConfig(data.electricityConfig ?? { cosPhi: 0.8, kvaPerGroup: 500, specificConsumption: 0.30, workDaysPerYear: 250, hoursPerDay: 8 });
       setAccessoryConfig(data.accessoryConfig ?? { items: [] });
       setIbmRate(data.ibmRate ?? 0.12);
+      setIbmRateInput(((data.ibmRate ?? 0.12) * 100).toString());
       if (data.dmParams) {
-        setDmVs(data.dmParams.vs);
-        setDmCfu(data.dmParams.cfu);
-        setDmHj(data.dmParams.hj);
-        setDmJa(data.dmParams.ja);
-        setDmN(data.dmParams.n);
+        setDmVs(data.dmParams.vs ?? '20');
+        setDmCfu(data.dmParams.cfu ?? '0.5');
+        setDmHj(data.dmParams.hj ?? '8');
+        setDmJa(data.dmParams.ja ?? '250');
+        setDmN(data.dmParams.n ?? '1');
       }
       if (data.productionConfig) {
         setProductionConfig(data.productionConfig);
       }
-      showToast("Version restaurée avec succès");
+      showToast("Version restaurée avec succès et sauvegardée");
       setActiveTab('dashboard');
     } catch (err) {
       console.error("Error restoring state:", err);
@@ -383,12 +406,17 @@ export default function App() {
     setEquipments(INITIAL_EQUIPMENTS);
     setRoles([]);
     setHrConfig({ socialChargesRate: 0.26, annualIncreaseRate: 0.03, paidMonths: 12 });
+    setSocialChargesInput("26");
+    setAnnualIncreaseInput("3");
+    setExperienceRateInput("6");
     setMachines([]);
     setOpConfig({ fuelPrice: 29, workDaysPerYear: 250, hoursPerDay: 8, annualInflationRate: 3 });
+    setAnnualInflationInput("3");
     setElectricityLines([]);
     setElectricityConfig({ cosPhi: 0.8, kvaPerGroup: 500, specificConsumption: 0.30, workDaysPerYear: 250, hoursPerDay: 8 });
     setAccessoryConfig({ items: [] });
     setIbmRate(0.12);
+    setIbmRateInput("12");
     setDmVs('1.5');
     setDmCfu('1');
     setDmHj('8');
@@ -458,6 +486,7 @@ export default function App() {
   const [newRoleCount, setNewRoleCount] = useState('');
   const [newRoleSalary, setNewRoleSalary] = useState('');
   const [newRoleAlloc, setNewRoleAlloc] = useState<'Granite' | 'Tuf' | 'Common'>('Common');
+  const [newRoleHasExperience, setNewRoleHasExperience] = useState(false);
   
   // New equipment form state
   const [newEqName, setNewEqName] = useState('');
@@ -507,10 +536,26 @@ export default function App() {
   const handleUpdateYear = useCallback((yearIndex: number, field: keyof AnnualData, value: number) => {
     setYears(prev => {
       const newYears = [...prev];
-      newYears[yearIndex] = { ...newYears[yearIndex], [field]: value };
+      let finalValue = value;
+      
+      if (field === 'matieresFournitures') {
+        const automatedFuel = opResults.fuel.granite[yearIndex] + opResults.fuel.tuf[yearIndex] + opResults.fuel.common[yearIndex];
+        const automatedElectricity = electricityResults.granite[yearIndex] + electricityResults.tuf[yearIndex] + electricityResults.common[yearIndex];
+        const automatedAccessories = accessoryResults.granite[yearIndex] + accessoryResults.tuf[yearIndex] + accessoryResults.common[yearIndex];
+        const totalAutomated = automatedFuel + automatedElectricity + automatedAccessories;
+        finalValue = Math.max(0, value - totalAutomated);
+      } else if (field === 'fraisPersonnel') {
+        const automatedHR = hrTotals.granite[yearIndex] + hrTotals.tuf[yearIndex] + hrTotals.common[yearIndex];
+        finalValue = Math.max(0, value - automatedHR);
+      } else if (field === 'dotationsAmortissements') {
+        const automatedAmort = amortResults.annualTotals.granite[yearIndex] + amortResults.annualTotals.tuf[yearIndex] + amortResults.annualTotals.common[yearIndex];
+        finalValue = Math.max(0, value - automatedAmort);
+      }
+      
+      newYears[yearIndex] = { ...newYears[yearIndex], [field]: finalValue };
       return newYears;
     });
-  }, []);
+  }, [opResults.fuel, electricityResults, accessoryResults, hrTotals, amortResults.annualTotals]);
 
   const addEquipment = () => {
     const errors: {name?: string, price?: string, duration?: string} = {};
@@ -559,12 +604,14 @@ export default function App() {
       designation: newRoleName,
       count: Number(newRoleCount),
       monthlySalary: Number(newRoleSalary),
-      allocation: newRoleAlloc
+      allocation: newRoleAlloc,
+      hasExperience: newRoleHasExperience
     };
     setRoles([...roles, role]);
     setNewRoleName('');
     setNewRoleCount('');
     setNewRoleSalary('');
+    setNewRoleHasExperience(false);
     setNewRoleErrors({});
     showToast("Nouveau poste créé");
   };
@@ -801,10 +848,14 @@ export default function App() {
     ];
 
     const formatExcel = (v: any) => {
-      if (v === undefined || v === null || v === "") return "0";
-      if (typeof v === 'number') {
-        if (isNaN(v)) return "0";
-        return v.toString().replace(".", ",");
+      if (v === undefined || v === null || v === "") return "0,00";
+      
+      // Convert to number if it matches a numeric format (removing space thousands separator if any)
+      const num = typeof v === 'number' ? v : parseFloat(String(v).replace(/\s/g, '').replace(',', '.'));
+      
+      if (!isNaN(num)) {
+        // Adopt exactly two decimal places with comma decimal separator
+        return num.toFixed(2).replace(".", ",");
       }
       return String(v);
     };
@@ -812,25 +863,29 @@ export default function App() {
     const rows = [
       ["EXTRACTION GRANITE (T)", ...calculatedYears.map(y => y.extractionGranite), totalRow.extractionGranite],
       ["EXTRACTION TUF (T)", ...calculatedYears.map(y => y.extractionTuf), totalRow.extractionTuf],
-      ["CHIFFRE AFFAIRES GRANITE (DA)", ...calculatedYears.map(y => y.caGranite), totalRow.caGranite],
-      ["CHIFFRE AFFAIRES TUF (DA)", ...calculatedYears.map(y => y.caTuf), totalRow.caTuf],
-      ["CHIFFRE AFFAIRES GLOBAL (DA)", ...calculatedYears.map(y => y.caGlobal), totalRow.caGlobal],
-      ["Matieres & Four. Cons. (DA)", ...calculatedYears.map(y => y.matieresFournitures), totalRow.matieresFournitures],
+      ["CHIFFRE D'AFFAIRES GRANITE (DA)", ...calculatedYears.map(y => y.caGranite), totalRow.caGranite],
+      ["CHIFFRE D'AFFAIRES TUF (DA)", ...calculatedYears.map(y => y.caTuf), totalRow.caTuf],
+      ["CHIFFRE D'AFFAIRES GLOBAL (DA)", ...calculatedYears.map(y => y.caGlobal), totalRow.caGlobal],
+      ["Matieres & Fournitures Consommables (DA)", ...calculatedYears.map(y => y.matieresFournitures), totalRow.matieresFournitures],
       ["Services (DA)", ...calculatedYears.map(y => y.services), totalRow.services],
+      ["Sous-Total 01 (Consommations) (DA)", ...calculatedYears.map(y => y.subtotal1), totalRow.subtotal1],
       ["VALEUR AJOUTEE (DA)", ...calculatedYears.map(y => y.valeurAjoutee), totalRow.valeurAjoutee],
       ["Charges de Personnel (DA)", ...calculatedYears.map(y => y.fraisPersonnel), totalRow.fraisPersonnel],
-      ["Impots & Taxes (DA)", ...calculatedYears.map(y => y.impotsTaxes), totalRow.impotsTaxes],
-      ["Charges financieres (DA)", ...calculatedYears.map(y => y.fraisFinanciers), totalRow.fraisFinanciers],
-      ["Dotations aux amortissements (DA)", ...calculatedYears.map(y => y.dotationsAmortissements), totalRow.dotationsAmortissements],
+      ["Impots, Taxes & Versements Assimiles (DA)", ...calculatedYears.map(y => y.impotsTaxes), totalRow.impotsTaxes],
+      ["Charges Financieres (DA)", ...calculatedYears.map(y => y.fraisFinanciers), totalRow.fraisFinanciers],
+      ["Dotations aux Amortissements (DA)", ...calculatedYears.map(y => y.dotationsAmortissements), totalRow.dotationsAmortissements],
+      ["Sous-Total 02 (Charges d'Exploitation) (DA)", ...calculatedYears.map(y => y.subtotal2), totalRow.subtotal2],
       ["RESULTAT D'EXPLOITATION (DA)", ...calculatedYears.map(y => y.resultatExploitation), totalRow.resultatExploitation],
-      ["Impots sur les benefices (IBM) (DA)", ...calculatedYears.map(y => y.ibm), totalRow.ibm],
-      ["RESULTAT NET (DA)", ...calculatedYears.map(y => y.resultatNet), totalRow.resultatNet],
+      ["Impots sur les Benefices (IBM) (DA)", ...calculatedYears.map(y => y.ibm), totalRow.ibm],
+      ["RESULTAT NET DE L'EXERCICE (DA)", ...calculatedYears.map(y => y.resultatNet), totalRow.resultatNet],
       ["CAPACITE D'AUTOFINANCEMENT (FNT) (DA)", ...calculatedYears.map(y => y.fnt), totalRow.fnt],
-      ["PRIX REVIENT GRANITE (DA/T)", ...calculatedYears.map(y => y.prixRevientGranite), totalRow.prixRevientGranite],
-      ["PRIX REVIENT TUF (DA/T)", ...calculatedYears.map(y => y.prixRevientTuf), totalRow.prixRevientTuf],
+      ["PRIX DE REVIENT GRANITE (DA/T)", ...calculatedYears.map(y => y.prixRevientGranite), totalRow.prixRevientGranite],
+      ["PRIX DE REVIENT TUF (DA/T)", ...calculatedYears.map(y => y.prixRevientTuf), totalRow.prixRevientTuf],
     ];
 
+    // Adding sep=; line tells Excel which character is the separator
     const csvContent = BOM + [
+      "sep=" + DELIMITER,
       headers.join(DELIMITER),
       ...rows.map(row => row.map(formatExcel).join(DELIMITER))
     ].join("\r\n");
@@ -866,8 +921,8 @@ export default function App() {
       })
     ];
 
-    const formatCurrencyDoc = (n: number) => n.toLocaleString('fr-DZ', { maximumFractionDigits: 2, minimumFractionDigits: 0 }) + " DA";
-    const formatValueDoc = (n: number) => n.toLocaleString('fr-DZ', { maximumFractionDigits: 2, minimumFractionDigits: 0 });
+    const formatCurrencyDoc = (n: number) => (n / 1000).toLocaleString('fr-DZ', { maximumFractionDigits: 2, minimumFractionDigits: 0 }) + " milliers de DA";
+    const formatValueDoc = (n: number) => (n / 1000).toLocaleString('fr-DZ', { maximumFractionDigits: 2, minimumFractionDigits: 0 });
 
     if (activeTab === 'invest') {
       sections.push(...createHeader("RAPPORT DES INVESTISSEMENTS & AMORTISSEMENTS", "Analyse détaillée du parc matériel et des dotations sur 10 ans"));
@@ -881,9 +936,9 @@ export default function App() {
       sections.push(new Paragraph({ text: "2. Tableau Récapitulatif des Équipements", heading: HeadingLevel.HEADING_2, spacing: { before: 300, after: 200 } }));
       const summaryHeaders = [
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Désignation", bold: true })] })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Prix Unitaire (DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Prix Unitaire (En milliers de DA)", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Durée (Ans)", bold: true })] })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Amort. Annuel (DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Amort. Annuel (En milliers de DA)", bold: true })] })] }),
       ];
       const summaryRowsItems = [new TableRow({ children: summaryHeaders })];
       equipments.forEach(eq => {
@@ -901,7 +956,7 @@ export default function App() {
       const headers = [
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Désignation des équipements", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Durée", bold: true })] })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Amort./An", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Amort./An (En milliers de DA)", bold: true })] })] }),
         ...Array.from({length: 10}).map((_, i) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: `${i+1}Année`, bold: true })] })] }))
       ];
 
@@ -928,7 +983,7 @@ export default function App() {
 
       // Total Row
       rows.push(new TableRow({ children: [
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL (DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL (En milliers de DA)", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ text: "" })] }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: formatValueDoc(totalAnnualAmort), bold: true })] })] }),
         ...totals.map(t => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: formatValueDoc(t), bold: true })] })] }))
@@ -936,7 +991,7 @@ export default function App() {
 
       sections.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows }));
       sections.push(new Paragraph({ 
-        children: [new TextRun({ text: "* Toutes les valeurs sont exprimées en DA (Valeurs exactes).", italics: true })],
+        children: [new TextRun({ text: "* Toutes les valeurs financières sont exprimées en milliers de DA.", italics: true })],
         spacing: { before: 200 } 
       }));
     } 
@@ -945,7 +1000,7 @@ export default function App() {
       
       sections.push(new Paragraph({ text: "1. Méthodologie", heading: HeadingLevel.HEADING_2, spacing: { before: 400, after: 200 } }));
       sections.push(new Paragraph({
-        text: `Le calcul repose sur les salaires mensuels de base multipliés par ${hrConfig.paidMonths} mois. Un taux de charges patronales de ${hrConfig.socialChargesRate * 100}% est appliqué au salaire brut. Une inflation annuelle de ${hrConfig.annualIncreaseRate * 100}% est appliquée cumulativement sur 10 ans pour projeter l'évolution des coûts.`,
+        text: `Le calcul repose sur les salaires mensuels réajustés selon l'expérience (avec un taux de prime d'expérience de ${(hrConfig.experienceRate ?? 0.06) * 100}% appliqué aux profils expérimentés), multipliés par ${hrConfig.paidMonths} mois. Un taux de charges patronales de ${hrConfig.socialChargesRate * 100}% est appliqué au salaire brut. Une inflation annuelle de ${hrConfig.annualIncreaseRate * 100}% est appliquée cumulativement sur 10 ans pour projeter l'évolution des coûts.`,
         spacing: { after: 200 }
       }));
 
@@ -953,16 +1008,21 @@ export default function App() {
       const summaryHeaders = [
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Poste", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Effectif", bold: true })] })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Salaire Mensuel base (DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Expérience", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Salaire Ajusté (DA)", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Coût Annuel Brut (DA)", bold: true })] })] }),
       ];
       const summaryRowsItems = [new TableRow({ children: summaryHeaders })];
       roles.forEach(r => {
-        const annualBrut = (r.monthlySalary ?? 0) * (hrConfig.paidMonths ?? 12) * (r.count ?? 0) * (1 + (hrConfig.socialChargesRate ?? 0));
+        const expRate = hrConfig.experienceRate ?? 0.06;
+        const hasExp = r.hasExperience ?? false;
+        const monthlyWithExp = hasExp ? (r.monthlySalary ?? 0) * (1 + expRate) : (r.monthlySalary ?? 0);
+        const annualBrut = monthlyWithExp * (hrConfig.paidMonths ?? 12) * (r.count ?? 0) * (1 + (hrConfig.socialChargesRate ?? 0));
         summaryRowsItems.push(new TableRow({ children: [
           new TableCell({ children: [new Paragraph({ text: r.designation ?? "" })] }),
           new TableCell({ children: [new Paragraph({ text: (r.count ?? 0).toString() })] }),
-          new TableCell({ children: [new Paragraph({ text: formatCurrencyDoc(r.monthlySalary ?? 0) })] }),
+          new TableCell({ children: [new Paragraph({ text: hasExp ? "Oui" : "Non" })] }),
+          new TableCell({ children: [new Paragraph({ text: formatCurrencyDoc(monthlyWithExp) })] }),
           new TableCell({ children: [new Paragraph({ text: formatCurrencyDoc(annualBrut) })] }),
         ] }));
       });
@@ -980,7 +1040,10 @@ export default function App() {
       const columnTotals = Array(10).fill(0);
 
       roles.forEach(r => {
-        const baseAnnual = (r.monthlySalary ?? 0) * (hrConfig.paidMonths ?? 12) * (r.count ?? 0) * (1 + (hrConfig.socialChargesRate ?? 0));
+        const expRate = hrConfig.experienceRate ?? 0.06;
+        const hasExp = r.hasExperience ?? false;
+        const monthlyWithExp = hasExp ? (r.monthlySalary ?? 0) * (1 + expRate) : (r.monthlySalary ?? 0);
+        const baseAnnual = monthlyWithExp * (hrConfig.paidMonths ?? 12) * (r.count ?? 0) * (1 + (hrConfig.socialChargesRate ?? 0));
         const yearCells = Array.from({length: 10}).map((_, i) => {
           const val = baseAnnual * Math.pow(1 + (hrConfig.annualIncreaseRate ?? 0), i);
           columnTotals[i] += val;
@@ -996,7 +1059,7 @@ export default function App() {
 
       // Total Row
       rows.push(new TableRow({ children: [
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL MASSE SALARIALE (DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL MASSE SALARIALE (En milliers de DA)", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ text: "" })] }),
         ...columnTotals.map(t => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: formatValueDoc(t), bold: true })] })] }))
       ] }));
@@ -1060,7 +1123,7 @@ export default function App() {
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Puiss. (kW)", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "L/h (Unit)", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Unités", bold: true })] })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Coût Annuel (DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Coût Annuel (En milliers de DA)", bold: true })] })] }),
       ];
       const summaryRowsItems = [new TableRow({ children: summaryHeaders })];
       machines.forEach(m => {
@@ -1103,7 +1166,7 @@ export default function App() {
 
       // Total Row
       rows.push(new TableRow({ children: [
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL FUEL (DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL FUEL (En milliers de DA)", bold: true })] })] }),
         ...columnTotals.map(t => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: formatValueDoc(t), bold: true })] })] }))
       ] }));
 
@@ -1119,7 +1182,7 @@ export default function App() {
       const summaryHeaders = [
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Ligne / Équipement", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Puissance (kW)", bold: true })] })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Coût Annuel Estimé (DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Coût Annuel Estimé (En milliers de DA)", bold: true })] })] }),
       ];
       const summaryRowsItems = [new TableRow({ children: summaryHeaders })];
       electricityLines.forEach(l => {
@@ -1161,7 +1224,7 @@ export default function App() {
 
       // Total Row
       rows.push(new TableRow({ children: [
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL ELEC (DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL ELEC (En milliers de DA)", bold: true })] })] }),
         ...columnTotals.map(t => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: formatValueDoc(t), bold: true })] })] }))
       ] }));
 
@@ -1177,7 +1240,7 @@ export default function App() {
       const summaryHeaders = [
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Désignation", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Unité", bold: true })] })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Prix Unit. (DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Prix Unit. (En milliers de DA)", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Qté / An", bold: true })] })] }),
       ];
       const summaryRowsItems = [new TableRow({ children: summaryHeaders })];
@@ -1217,7 +1280,7 @@ export default function App() {
 
       // Total Row
       rows.push(new TableRow({ children: [
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL ACC. (DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL ACC. (En milliers de DA)", bold: true })] })] }),
         ...columnTotals.map(t => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: formatValueDoc(t), bold: true })] })] }))
       ] }));
 
@@ -1249,7 +1312,7 @@ export default function App() {
       ];
       sections.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: summaryRowsItems }));
 
-      sections.push(new Paragraph({ text: "3. Tableau Détaillé du TCR sur 10 Ans", heading: HeadingLevel.HEADING_2, spacing: { before: 400, after: 200 } }));
+      sections.push(new Paragraph({ text: "3. Tableau Détaillé du TCR sur 10 Ans (En milliers de DA)", heading: HeadingLevel.HEADING_2, spacing: { before: 400, after: 200 } }));
       
       const headersArr = [
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Compte", bold: true })] })] }),
@@ -1288,7 +1351,7 @@ export default function App() {
       const summaryRows = [
         new TableRow({ children: [
           new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Indicateur", bold: true })] })] }),
-          new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Valeur Cumulée (10 Ans)", bold: true })] })] }),
+          new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Valeur Cumulée (10 Ans) (En milliers de DA)", bold: true })] })] }),
         ] }),
         new TableRow({ children: [
           new TableCell({ children: [new Paragraph({ text: "Chiffre d'Affaires Global" })] }),
@@ -2475,22 +2538,64 @@ export default function App() {
                           <option value="Common">Commun (Admin/Garde)</option>
                         </select>
                       </div>
+                      <div className="space-y-1.5 flex items-start gap-3 bg-sleek-bg/30 border border-sleek-border p-3 rounded-xl">
+                        <input
+                          id="newRoleHasExperience"
+                          type="checkbox"
+                          checked={newRoleHasExperience}
+                          onChange={(e) => setNewRoleHasExperience(e.target.checked)}
+                          className="w-4 h-4 text-sleek-primary bg-sleek-bg/60 border-sleek-border rounded focus:ring-sleek-primary focus:ring-2 mt-0.5 cursor-pointer"
+                        />
+                        <div className="flex flex-col">
+                          <label htmlFor="newRoleHasExperience" className="text-[11px] font-bold uppercase tracking-wider text-sleek-text-main cursor-pointer select-none">
+                            Bénéficie de l'expérience (+{Math.round((hrConfig.experienceRate ?? 0.06) * 100)}%)
+                          </label>
+                          <span className="text-[9px] text-sleek-text-muted opacity-80 leading-tight">
+                            Cochez si ce personnel possède une expérience professionnelle qualifiante pour bénéficier de la majoration de salaire.
+                          </span>
+                        </div>
+                      </div>
                       <div className="pt-4 border-t border-sleek-border space-y-4">
                         <h4 className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-60">Paramètres de Masse Salariale</h4>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                            <InputGroupVertical 
                              label="Charges Soc. (%)" 
-                             value={((hrConfig.socialChargesRate ?? 0) * 100).toString()} 
-                             onChange={v => setHrConfig({...hrConfig, socialChargesRate: Number(v)/100})} 
-                             type="number" 
+                             value={socialChargesInput} 
+                             onChange={v => {
+                               setSocialChargesInput(v);
+                               const parsed = parseFloat(v.replace(',', '.'));
+                               if (!isNaN(parsed)) {
+                                 setHrConfig(prev => ({...prev, socialChargesRate: parsed/100}));
+                               }
+                             }} 
+                             type="text" 
                              formula="Taux des charges patronales (CNAS, etc.) calculé sur le salaire net + primes pour obtenir le coût employeur."
                            />
                            <InputGroupVertical 
                              label="Inflation (%)" 
-                             value={((hrConfig.annualIncreaseRate ?? 0) * 100).toString()} 
-                             onChange={v => setHrConfig({...hrConfig, annualIncreaseRate: Number(v)/100})} 
-                             type="number" 
+                             value={annualIncreaseInput} 
+                             onChange={v => {
+                               setAnnualIncreaseInput(v);
+                               const parsed = parseFloat(v.replace(',', '.'));
+                               if (!isNaN(parsed)) {
+                                 setHrConfig(prev => ({...prev, annualIncreaseRate: parsed/100}));
+                               }
+                             }} 
+                             type="text" 
                              formula="Taux d'augmentation annuel prévu des salaires pour compenser l'inflation du coût de la vie."
+                           />
+                           <InputGroupVertical 
+                             label="Prime Expérience (%)" 
+                             value={experienceRateInput} 
+                             onChange={v => {
+                               setExperienceRateInput(v);
+                               const parsed = parseFloat(v.replace(',', '.'));
+                               if (!isNaN(parsed)) {
+                                 setHrConfig(prev => ({...prev, experienceRate: parsed/100}));
+                               }
+                             }} 
+                             type="text" 
+                             formula="Pourcentage additionnel ajouté au salaire mensuel de base du personnel identifié comme ayant de l'expérience (ex: 6%)."
                            />
                         </div>
                       </div>
@@ -2512,19 +2617,39 @@ export default function App() {
                           <tr className="text-[10px] font-bold text-sleek-text-muted uppercase tracking-wider">
                             <th className="p-4">Désignation</th>
                             <th className="p-4 text-center">Effectif</th>
-                            <th className="p-4 text-right">Sal. Mensuel (DA)</th>
-                            <th className="p-4 text-right">Coût Annuel (DA)</th>
+                            <th className="p-4 text-right">Salaire Base (DA)</th>
+                            <th className="p-4 text-center">Expérience</th>
+                            <th className="p-4 text-right">Salaire Ajusté (DA)</th>
+                            <th className="p-4 text-right">Coût Annuel Brut (DA)</th>
                             <th className="p-4 text-center">Action</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-sleek-border/20">
                           {roles.map(role => {
-                            const annual = role.count * role.monthlySalary * 12 * (1 + hrConfig.socialChargesRate);
+                            const expRate = hrConfig.experienceRate ?? 0.06;
+                            const hasExp = role.hasExperience ?? false;
+                            const finalMonthly = hasExp ? role.monthlySalary * (1 + expRate) : role.monthlySalary;
+                            const annual = role.count * finalMonthly * 12 * (1 + hrConfig.socialChargesRate);
                             return (
                               <tr key={role.id} className="hover:bg-sleek-bg/50 transition-colors">
-                                <td className="p-4 font-semibold text-sleek-text-main">{role.designation}</td>
+                                <td className="p-4 font-semibold text-sleek-text-main">
+                                  <div>{role.designation}</div>
+                                  <div className="text-[9px] opacity-60 mt-0.5">
+                                    <span className="px-1.5 py-0.2 bg-sleek-bg border border-sleek-border rounded text-[8px] uppercase font-bold tracking-wider">{role.allocation}</span>
+                                  </div>
+                                </td>
                                 <td className="p-4 text-center">{role.count}</td>
                                 <td className="p-4 text-right font-mono">{formatCurrency(role.monthlySalary)}</td>
+                                <td className="p-4 text-center">
+                                  {hasExp ? (
+                                    <span className="text-sleek-primary font-bold bg-sleek-primary/10 px-2.5 py-1 rounded-lg text-[10px] uppercase font-mono">
+                                      Oui (+{Math.round(expRate * 100)}%)
+                                    </span>
+                                  ) : (
+                                    <span className="text-sleek-text-muted opacity-60 italic">Non</span>
+                                  )}
+                                </td>
+                                <td className="p-4 text-right font-mono font-semibold">{formatCurrency(finalMonthly)}</td>
                                 <td className="p-4 text-right font-mono font-bold text-sleek-primary">{formatCurrency(annual)}</td>
                                 <td className="p-4 text-center">
                                   <button onClick={() => removeRole(role.id)} className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"><Trash size={14}/></button>
@@ -2533,7 +2658,7 @@ export default function App() {
                             );
                           })}
                           {roles.length === 0 && (
-                            <tr><td colSpan={5} className="p-10 text-center text-sleek-text-muted italic">Aucun personnel enregistré.</td></tr>
+                            <tr><td colSpan={7} className="p-10 text-center text-sleek-text-muted italic">Aucun personnel enregistré.</td></tr>
                           )}
                         </tbody>
                       </table>
@@ -3385,6 +3510,7 @@ export default function App() {
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
+                          handleSave();
                         }}
                         className="flex items-center gap-2 px-4 py-2 bg-sleek-primary text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-sleek-primary/90 transition-all shadow-lg shadow-sleek-primary/20"
                       >
@@ -3409,9 +3535,15 @@ export default function App() {
                             <h4 className="text-[10px] font-bold text-sleek-text-muted uppercase tracking-widest border-b border-sleek-border pb-2">Fiscalité</h4>
                             <InputGroupVertical 
                               label="Taux IBM (%)" 
-                              value={((ibmRate ?? 0) * 100).toString()} 
-                              onChange={(v) => setIbmRate(Number(v) / 100)} 
-                              type="number"
+                              value={ibmRateInput} 
+                              onChange={(v) => {
+                                setIbmRateInput(v);
+                                const parsed = parseFloat(v.replace(',', '.'));
+                                if (!isNaN(parsed)) {
+                                  setIbmRate(parsed / 100);
+                                }
+                              }} 
+                              type="text"
                               helper="Impôt sur les Bénéfices des Travaux Miniers"
                             />
                           </div>
@@ -3420,15 +3552,27 @@ export default function App() {
                             <div className="space-y-4">
                               <InputGroupVertical 
                                 label="Charges Sociales (%)" 
-                                value={((hrConfig.socialChargesRate ?? 0) * 100).toString()} 
-                                onChange={(v) => setHrConfig({...hrConfig, socialChargesRate: Number(v)/100})} 
-                                type="number"
+                                value={socialChargesInput} 
+                                onChange={(v) => {
+                                  setSocialChargesInput(v);
+                                  const parsed = parseFloat(v.replace(',', '.'));
+                                  if (!isNaN(parsed)) {
+                                    setHrConfig(prev => ({...prev, socialChargesRate: parsed/100}));
+                                  }
+                                }} 
+                                type="text"
                               />
                               <InputGroupVertical 
                                 label="Augmentation Annuelle (%)" 
-                                value={((hrConfig.annualIncreaseRate ?? 0) * 100).toString()} 
-                                onChange={(v) => setHrConfig({...hrConfig, annualIncreaseRate: Number(v)/100})} 
-                                type="number"
+                                value={annualIncreaseInput} 
+                                onChange={(v) => {
+                                  setAnnualIncreaseInput(v);
+                                  const parsed = parseFloat(v.replace(',', '.'));
+                                  if (!isNaN(parsed)) {
+                                    setHrConfig(prev => ({...prev, annualIncreaseRate: parsed/100}));
+                                  }
+                                }} 
+                                type="text"
                               />
                             </div>
                           </div>
@@ -3437,9 +3581,15 @@ export default function App() {
                             <div className="space-y-4">
                               <InputGroupVertical 
                                 label="Inflation Fuel/Maint (%)" 
-                                value={(opConfig.annualInflationRate ?? 0).toString()} 
-                                onChange={(v) => setOpConfig({...opConfig, annualInflationRate: Number(v)})} 
-                                type="number"
+                                value={annualInflationInput} 
+                                onChange={(v) => {
+                                  setAnnualInflationInput(v);
+                                  const parsed = parseFloat(v.replace(',', '.'));
+                                  if (!isNaN(parsed)) {
+                                    setOpConfig(prev => ({...prev, annualInflationRate: parsed}));
+                                  }
+                                }} 
+                                type="text"
                               />
                               <InputGroupVertical 
                                 label="Prix du Litre (DA)" 
@@ -3822,7 +3972,7 @@ export default function App() {
                        </button>
                     </div>
 
-                    {(!history || history.length === 0) ? (
+                    {(!Array.isArray(history) || history.length === 0) ? (
                       <div className="flex flex-col items-center justify-center py-20 bg-sleek-bg/50 rounded-3xl border border-dashed border-sleek-border/50">
                         <Clock size={48} className="text-sleek-text-muted/20 mb-4" />
                         <p className="text-sm font-bold text-sleek-text-muted opacity-40 uppercase tracking-widest">Aucune sauvegarde trouvée</p>
@@ -3830,7 +3980,7 @@ export default function App() {
                       </div>
                     ) : (
                       <div className="space-y-4">
-                        {history.map((save, idx) => (
+                        {Array.isArray(history) && history.map((save, idx) => (
                           <div key={idx} className="group relative bg-sleek-bg/40 border border-sleek-border hover:border-sleek-primary/30 hover:bg-sleek-card rounded-2xl p-6 transition-all shadow-sm hover:shadow-xl">
                             <div className="flex items-center justify-between">
                               <div className="flex flex-col gap-1">

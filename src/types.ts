@@ -6,12 +6,14 @@ export interface EmployeeRole {
   count: number;
   monthlySalary: number;
   allocation: Allocation;
+  hasExperience?: boolean;
 }
 
 export interface HRConfig {
   socialChargesRate: number;
   annualIncreaseRate: number;
   paidMonths: number;
+  experienceRate?: number;
 }
 
 export interface OperationalConfig {
