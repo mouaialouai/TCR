@@ -115,7 +115,20 @@ const INITIAL_YEARS_TUF: AnnualData[] = [
   { year: 10, extractionGranite: 0, caGranite: 0, extractionTuf: 55000, caTuf: 0, matieresFournitures: 10100000, services: 4900000, fraisPersonnel: 0, impotsTaxes: 1300000, fraisFinanciers: 300000, dotationsAmortissements: 0 }
 ];
 
-const INITIAL_YEARS: AnnualData[] = INITIAL_YEARS_GRANITE;
+const INITIAL_YEARS_COMBINED: AnnualData[] = [
+  { year: 1, extractionGranite: 3500, caGranite: 0, extractionTuf: 45000, caTuf: 0, matieresFournitures: 8000000, services: 4000000, fraisPersonnel: 0, impotsTaxes: 850000, fraisFinanciers: 1200000, dotationsAmortissements: 0 },
+  { year: 2, extractionGranite: 4000, caGranite: 0, extractionTuf: 48000, caTuf: 0, matieresFournitures: 8200000, services: 4100000, fraisPersonnel: 0, impotsTaxes: 900000, fraisFinanciers: 1100000, dotationsAmortissements: 0 },
+  { year: 3, extractionGranite: 4500, caGranite: 0, extractionTuf: 50000, caTuf: 0, matieresFournitures: 8500000, services: 4200000, fraisPersonnel: 0, impotsTaxes: 950000, fraisFinanciers: 1000000, dotationsAmortissements: 0 },
+  { year: 4, extractionGranite: 5000, caGranite: 0, extractionTuf: 52000, caTuf: 0, matieresFournitures: 8800000, services: 4300000, fraisPersonnel: 0, impotsTaxes: 1000000, fraisFinanciers: 900000, dotationsAmortissements: 0 },
+  { year: 5, extractionGranite: 5500, caGranite: 0, extractionTuf: 55000, caTuf: 0, matieresFournitures: 9100000, services: 4400000, fraisPersonnel: 0, impotsTaxes: 1050000, fraisFinanciers: 800000, dotationsAmortissements: 0 },
+  { year: 6, extractionGranite: 5500, caGranite: 0, extractionTuf: 55000, caTuf: 0, matieresFournitures: 9300000, services: 4500000, fraisPersonnel: 0, impotsTaxes: 1100000, fraisFinanciers: 700000, dotationsAmortissements: 0 },
+  { year: 7, extractionGranite: 5500, caGranite: 0, extractionTuf: 55000, caTuf: 0, matieresFournitures: 9500000, services: 4600000, fraisPersonnel: 0, impotsTaxes: 1150000, fraisFinanciers: 600000, dotationsAmortissements: 0 },
+  { year: 8, extractionGranite: 5500, caGranite: 0, extractionTuf: 55000, caTuf: 0, matieresFournitures: 9700000, services: 4700000, fraisPersonnel: 0, impotsTaxes: 1200000, fraisFinanciers: 500000, dotationsAmortissements: 0 },
+  { year: 9, extractionGranite: 5500, caGranite: 0, extractionTuf: 55000, caTuf: 0, matieresFournitures: 9900000, services: 4800000, fraisPersonnel: 0, impotsTaxes: 1250000, fraisFinanciers: 400000, dotationsAmortissements: 0 },
+  { year: 10, extractionGranite: 5500, caGranite: 0, extractionTuf: 55000, caTuf: 0, matieresFournitures: 10100000, services: 4900000, fraisPersonnel: 0, impotsTaxes: 1300000, fraisFinanciers: 300000, dotationsAmortissements: 0 }
+];
+
+const INITIAL_YEARS: AnnualData[] = INITIAL_YEARS_COMBINED;
 
 const INITIAL_ROLES: EmployeeRole[] = [
   { id: "1", designation: "Directeur d'exploitation", count: 1, monthlySalary: 120000, hasExperience: true, allocation: "Common" },
@@ -303,6 +316,30 @@ const PRELOADED_TUF = {
   dmParams: { vs: '20', cfu: '0.5', hj: '8', ja: '250', n: '1' },
   productionConfig: INITIAL_PROD_CONFIG,
   lastSaved: "2026-06-03T00:00:01.000Z"
+};
+
+const PRELOADED_COMBINED = {
+  saveName: "TCR COMBINE",
+  userNotes: "",
+  years: INITIAL_YEARS_COMBINED,
+  equipments: INITIAL_EQUIPMENTS,
+  roles: INITIAL_ROLES,
+  hrConfig: { socialChargesRate: 0.26, annualIncreaseRate: 0.03, paidMonths: 12, experienceRate: 0.06 },
+  machines: INITIAL_MACHINES,
+  opConfig: { fuelPrice: 29, workDaysPerYear: 250, hoursPerDay: 8, annualInflationRate: 3 },
+  electricityLines: INITIAL_ELECTRICITY_LINES,
+  electricityConfig: { cosPhi: 0.8, kvaPerGroup: 500, specificConsumption: 0.30, workDaysPerYear: 250, hoursPerDay: 8 },
+  accessoryConfig: { items: INITIAL_ACCESSORY_ITEMS },
+  waterConfig: INITIAL_WATER_CONFIG_WITH_ITEMS,
+  ibmRate: 0.12,
+  priceGranite: 4500,
+  densityGranite: 2.49,
+  priceTuf: 3500,
+  densityTuf: 2.39,
+  decimalPlaces: 2,
+  dmParams: { vs: '20', cfu: '0.5', hj: '8', ja: '250', n: '1' },
+  productionConfig: INITIAL_PROD_CONFIG,
+  lastSaved: "2026-06-03T00:00:02.000Z"
 };
 
 export default function App() {
@@ -531,7 +568,7 @@ export default function App() {
   const [dmN, setDmN] = useState(initialState?.dmParams?.n ?? '1');
 
   const [isSettingsExpanded, setIsSettingsExpanded] = useState(false);
-  const [history, setHistory] = useLocalStorage<any[]>('graniteapp_history_v1', [PRELOADED_GRANITE, PRELOADED_TUF]);
+  const [history, setHistory] = useLocalStorage<any[]>('graniteapp_history_v1', [PRELOADED_GRANITE, PRELOADED_TUF, PRELOADED_COMBINED]);
   const [customSaveName, setCustomSaveName] = useState<string>("TCR GRANITE");
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
   const [resetSaveName, setResetSaveName] = useState("TCR GRANITE");
@@ -590,13 +627,30 @@ export default function App() {
   };
 
   useEffect(() => {
-    const hasTcrGranite = Array.isArray(history) && history.some((item: any) => item.saveName === "TCR GRANITE");
-    if (!hasTcrGranite) {
-      const timer = setTimeout(() => {
-        handleSave("TCR GRANITE");
-      }, 500);
-      return () => clearTimeout(timer);
-    }
+    setHistory(prev => {
+      const current = Array.isArray(prev) ? prev : [];
+      let updated = [...current];
+      let changed = false;
+      
+      const hasGranite = updated.some(item => item && item.saveName === "TCR GRANITE");
+      const hasTuf = updated.some(item => item && item.saveName === "TCR TUF");
+      const hasCombined = updated.some(item => item && item.saveName === "TCR COMBINE");
+      
+      if (!hasGranite) {
+        updated.push(PRELOADED_GRANITE);
+        changed = true;
+      }
+      if (!hasTuf) {
+        updated.push(PRELOADED_TUF);
+        changed = true;
+      }
+      if (!hasCombined) {
+        updated.push(PRELOADED_COMBINED);
+        changed = true;
+      }
+      
+      return changed ? updated : prev;
+    });
   }, []);
 
   const restoreFromHistory = (data: any) => {
