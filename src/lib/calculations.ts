@@ -12,7 +12,9 @@ import {
   ElectricityLine,
   ElectricityConfig,
   AccessoryConfig,
-  AccessoryItem
+  AccessoryItem,
+  WaterConfig,
+  WaterItem
 } from '../types';
 
 export interface SplitCosts {
@@ -20,6 +22,61 @@ export interface SplitCosts {
   tuf: number[];
   common: number[];
 }
+
+export interface WaterResults {
+  annualVolumes: number[];
+  annualCosts: SplitCosts;
+}
+
+export const getWaterCosts = (config: WaterConfig | undefined | null): WaterResults => {
+  const volumes = Array(10).fill(0);
+  const costs = Array(10).fill(0);
+  
+  if (!config) {
+    return {
+      annualVolumes: volumes,
+      annualCosts: { granite: Array(10).fill(0), tuf: Array(10).fill(0), common: costs }
+    };
+  }
+
+  const items = config.items || [];
+  const globalPrice = config.globalPrice ?? 40.95;
+  const hasCustomPrices = !!config.hasCustomPrices;
+  const customPrices = config.customPrices || Array(10).fill(globalPrice);
+  
+  for (let i = 0; i < 10; i++) {
+    const prix = hasCustomPrices 
+      ? (customPrices[i] !== undefined && customPrices[i] !== null ? customPrices[i] : globalPrice)
+      : globalPrice;
+      
+    let totalVol = 0;
+    let totalCost = 0;
+    
+    items.forEach(item => {
+      if (!item) return;
+      const flowRate = item.flowRate || 0;
+      const itemCustomHours = item.customHours || [];
+      const hours = item.hasCustomHours 
+        ? (itemCustomHours[i] !== undefined && itemCustomHours[i] !== null ? itemCustomHours[i] : (item.hoursPerYear || 0))
+        : (item.hoursPerYear || 0);
+        
+      const vol = (flowRate / 1000) * hours;
+      const cost = vol * prix;
+      
+      totalVol += vol;
+      totalCost += cost;
+    });
+    
+    volumes[i] = totalVol;
+    costs[i] = totalCost;
+  }
+  
+  return {
+    annualVolumes: volumes,
+    annualCosts: { granite: Array(10).fill(0), tuf: Array(10).fill(0), common: costs }
+  };
+};
+
 
 export const getElectricityCosts = (lines: ElectricityLine[], config: ElectricityConfig, opConfig: OperationalConfig): SplitCosts => {
   const costs = Array(10).fill(0);
@@ -147,8 +204,27 @@ export const calculateYear = (
   electricitySplit: SplitCosts,
   accessorySplit: SplitCosts,
   idx: number,
+  priceGranite: number = 0,
+  densityGranite: number = 2.49,
+  priceTuf: number = 0,
+  densityTuf: number = 2.39,
+  decimalPlaces: number = 2,
+  waterSplit?: SplitCosts,
 ): FullYearData => {
-  const caGlobal = (data.caGranite || 0) + (data.caTuf || 0);
+  const round = (val: number, decimals: number) => {
+    const factor = Math.pow(10, decimals);
+    return Math.round(val * factor) / factor;
+  };
+
+  const volumeGranite = data.extractionGranite || 0;
+  const caGraniteCalculated = priceGranite > 0 ? volumeGranite * priceGranite : 0;
+
+  const volumeTuf = densityTuf > 0 ? (data.extractionTuf || 0) / densityTuf : 0;
+  const caTufCalculated = priceTuf > 0 ? volumeTuf * priceTuf : 0;
+
+  const caGranite = round(caGraniteCalculated, decimalPlaces);
+  const caTuf = round(caTufCalculated, decimalPlaces);
+  const caGlobal = caGranite + caTuf;
   
   // Intégration Automatique des coûts calculés dans le TCR
   // On additionne la partie saisie manuellement avec la partie automatisée
@@ -157,8 +233,10 @@ export const calculateYear = (
   const automatedAmort = amortSplit.granite[idx] + amortSplit.tuf[idx] + amortSplit.common[idx];
   const automatedElectricity = electricitySplit.granite[idx] + electricitySplit.tuf[idx] + electricitySplit.common[idx];
   const automatedAccessories = accessorySplit.granite[idx] + accessorySplit.tuf[idx] + accessorySplit.common[idx];
+  const automatedWater = waterSplit ? (waterSplit.granite[idx] + waterSplit.tuf[idx] + waterSplit.common[idx]) : 0;
 
-  const finalMatieres = data.matieresFournitures + automatedFuel + automatedElectricity + automatedAccessories;
+  const finalMatieres = data.matieresFournitures + automatedFuel + automatedElectricity + automatedAccessories + automatedWater;
+
   const finalHR = data.fraisPersonnel + automatedHR;
   const finalAmort = data.dotationsAmortissements + automatedAmort;
 
@@ -186,9 +264,11 @@ export const calculateYear = (
   const totalExpenses = subtotal1 + subtotal2;
   const commonPool = Math.max(0, totalExpenses - directGranite - directTuf);
 
-  const totalTonnage = (data.extractionGranite || 0) + (data.extractionTuf || 0) || 1;
-  const graniteRatio = (data.extractionGranite || 0) / totalTonnage;
-  const tufRatio = (data.extractionTuf || 0) / totalTonnage;
+  const graniteTonnage = (data.extractionGranite || 0) * densityGranite;
+  const tufTonnage = data.extractionTuf || 0;
+  const totalTonnage = graniteTonnage + tufTonnage || 1;
+  const graniteRatio = graniteTonnage / totalTonnage;
+  const tufRatio = tufTonnage / totalTonnage;
 
   const costGranite = directGranite + (commonPool * graniteRatio);
   const costTuf = directTuf + (commonPool * tufRatio);
@@ -198,6 +278,8 @@ export const calculateYear = (
 
   return {
     ...data,
+    caGranite,
+    caTuf,
     matieresFournitures: finalMatieres,
     fraisPersonnel: finalHR,
     dotationsAmortissements: finalAmort,

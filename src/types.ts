@@ -164,3 +164,23 @@ export interface ProductionDimensioning {
     retaille: ProductionStep;
   };
 }
+
+export interface WaterItem {
+  id: string;
+  designation: string;
+  flowRate: number; // L/h
+  hoursPerYear: number; // default h/an
+  hasCustomHours: boolean;
+  customHours: number[]; // Array of 10 values for Years 1..10
+  hoursPerShift?: number; // h/poste
+  shiftsPerDay?: number;  // postes/jour
+  daysPerYear?: number;   // jours/an
+}
+
+export interface WaterConfig {
+  globalPrice: number; // Price of water (DA/m3)
+  hasCustomPrices: boolean;
+  customPrices: number[]; // Array of 10 prices for Years 1..10
+  items: WaterItem[];
+}
+

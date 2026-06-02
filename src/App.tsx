@@ -12,9 +12,11 @@ import {
   PieChart,
   HardDrive,
   PlusCircle,
+  Plus,
   TrendingDown,
   Trash,
   Info,
+  Droplets,
   Users,
   LayoutDashboard,
   Wallet,
@@ -32,6 +34,7 @@ import {
   Redo2,
   BookOpen,
   History,
+  Save,
   Clock,
   Search,
   X,
@@ -42,7 +45,11 @@ import {
   ExternalLink,
   Mountain,
   Building,
-  Zap
+  Zap,
+  Cloud,
+  LogIn,
+  LogOut,
+  RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -82,9 +89,31 @@ import {
   PageNumber
 } from "docx";
 import { cn } from './lib/utils';
-import { AnnualData, Equipment, EmployeeRole, HRConfig, OperationalMachine, OperationalConfig, InvestmentCategory, CalculationSnapshot, ElectricityLine, ElectricityConfig, AccessoryConfig, AccessoryItem, Allocation, AccessoryCalculationMode, ProductionDimensioning, FullYearData } from './types';
-import { calculateYear, calculateTotals, getAmortizationSchedule, getHRCosts, getOperationalCosts, getElectricityCosts, getAccessoryCosts, SplitCosts } from './lib/calculations';
+import { AnnualData, Equipment, EmployeeRole, HRConfig, OperationalMachine, OperationalConfig, InvestmentCategory, CalculationSnapshot, ElectricityLine, ElectricityConfig, AccessoryConfig, AccessoryItem, Allocation, AccessoryCalculationMode, ProductionDimensioning, FullYearData, WaterConfig, WaterItem } from './types';
+import { calculateYear, calculateTotals, getAmortizationSchedule, getHRCosts, getOperationalCosts, getElectricityCosts, getAccessoryCosts, SplitCosts, getWaterCosts } from './lib/calculations';
 import { KOTLIN_VIEWMODEL, LAYOUT_XML } from './lib/androidCodeTemplates';
+
+// Firebase Imports
+import { 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  signOut, 
+  onAuthStateChanged,
+  User as FirebaseUser
+} from "firebase/auth";
+import { 
+  collection, 
+  doc, 
+  getDocs, 
+  getDocFromServer, 
+  setDoc, 
+  deleteDoc, 
+  query, 
+  where, 
+  orderBy 
+} from "firebase/firestore";
+import { db, auth, OperationType, handleFirestoreError } from "./lib/firebase";
+
 
 const INITIAL_YEARS: AnnualData[] = Array.from({ length: 10 }, (_, i) => ({
   year: i + 1,
@@ -117,6 +146,13 @@ const formatCompact = (n: number) => {
 };
 
 const INITIAL_EQUIPMENTS: Equipment[] = [];
+
+const INITIAL_WATER_CONFIG: WaterConfig = {
+  globalPrice: 40.95,
+  hasCustomPrices: false,
+  customPrices: Array(10).fill(40.95),
+  items: []
+};
 
 const INITIAL_PROD_CONFIG: ProductionDimensioning = {
   horizon: '1y',
@@ -223,6 +259,20 @@ export default function App() {
   const [ibmRate, setIbmRate] = useState<number>(initialState?.ibmRate ?? 0.12);
   const [ibmRateInput, setIbmRateInput] = useState<string>(((initialState?.ibmRate ?? 0.12) * 100).toString());
 
+  // Matériaux State - Prix, Densité et Arrondis
+  const [priceGranite, setPriceGranite] = useState<number>(initialState?.priceGranite ?? 4500);
+  const [priceGraniteInput, setPriceGraniteInput] = useState<string>((initialState?.priceGranite ?? 4500).toString());
+  const [densityGranite, setDensityGranite] = useState<number>(initialState?.densityGranite ?? 2.49);
+  const [densityGraniteInput, setDensityGraniteInput] = useState<string>((initialState?.densityGranite ?? 2.49).toString());
+
+  const [priceTuf, setPriceTuf] = useState<number>(initialState?.priceTuf ?? 3500);
+  const [priceTufInput, setPriceTufInput] = useState<string>((initialState?.priceTuf ?? 3500).toString());
+  const [densityTuf, setDensityTuf] = useState<number>(initialState?.densityTuf ?? 2.39);
+  const [densityTufInput, setDensityTufInput] = useState<string>((initialState?.densityTuf ?? 2.39).toString());
+
+  const [decimalPlaces, setDecimalPlaces] = useState<number>(initialState?.decimalPlaces ?? 2);
+  const [decimalPlacesInput, setDecimalPlacesInput] = useState<string>((initialState?.decimalPlaces ?? 2).toString());
+
   // HR State
   const [roles, setRoles] = useState<EmployeeRole[]>(initialState?.roles ?? []);
   const [hrConfig, setHrConfig] = useState<HRConfig>(() => {
@@ -287,8 +337,11 @@ export default function App() {
   });
 
   // Accessory State
-  const [accessoryConfig, setAccessoryConfig] = useState<AccessoryConfig>(initialState?.accessoryConfig ?? {
-    items: []
+  const [accessoryConfig, setAccessoryConfig] = useState<AccessoryConfig>(() => {
+    const base = initialState?.accessoryConfig;
+    return {
+      items: base?.items || []
+    };
   });
 
   // Form states for new accessory
@@ -306,7 +359,75 @@ export default function App() {
   const [dmAlloc, setDmAlloc] = useState<Allocation>('Common');
 
   // Production State
-  const [productionConfig, setProductionConfig] = useState<ProductionDimensioning>(initialState?.productionConfig ?? INITIAL_PROD_CONFIG);
+  const [productionConfig, setProductionConfig] = useState<ProductionDimensioning>(() => {
+    const base = initialState?.productionConfig;
+    if (!base) return INITIAL_PROD_CONFIG;
+    return {
+      ...INITIAL_PROD_CONFIG,
+      ...base,
+      yieldsConstant: {
+        ...INITIAL_PROD_CONFIG.yieldsConstant,
+        ...(base.yieldsConstant || {})
+      },
+      yieldsVariable: {
+        ...INITIAL_PROD_CONFIG.yieldsVariable,
+        ...(base.yieldsVariable || {})
+      },
+      steps: {
+        extraction: {
+          ...INITIAL_PROD_CONFIG.steps.extraction,
+          ...(base.steps?.extraction || {}),
+          dimensions: {
+            ...INITIAL_PROD_CONFIG.steps.extraction.dimensions,
+            ...(base.steps?.extraction?.dimensions || {})
+          },
+          productivity: {
+            ...INITIAL_PROD_CONFIG.steps.extraction.productivity,
+            ...(base.steps?.extraction?.productivity || {})
+          }
+        },
+        retaille: {
+          ...INITIAL_PROD_CONFIG.steps.retaille,
+          ...(base.steps?.retaille || {}),
+          dimensions: {
+            ...INITIAL_PROD_CONFIG.steps.retaille.dimensions,
+            ...(base.steps?.retaille?.dimensions || {})
+          },
+          productivity: {
+            ...INITIAL_PROD_CONFIG.steps.retaille.productivity,
+            ...(base.steps?.retaille?.productivity || {})
+          }
+        }
+      }
+    };
+  });
+
+  // Water Consumption State
+  const [waterConfig, setWaterConfig] = useState<WaterConfig>(() => {
+    const base = initialState?.waterConfig;
+    if (!base) return INITIAL_WATER_CONFIG;
+    return {
+      ...INITIAL_WATER_CONFIG,
+      ...base,
+      customPrices: base.customPrices ?? Array(10).fill(base.globalPrice ?? 40.95),
+      items: base.items || []
+    };
+  });
+
+  // Form states for adding new water consumptions
+  const [newWaterName, setNewWaterName] = useState('');
+  const [newWaterFlow, setNewWaterFlow] = useState('');
+  const [newWaterHrsPerShift, setNewWaterHrsPerShift] = useState('8');
+  const [newWaterShiftsPerDay, setNewWaterShiftsPerDay] = useState('1');
+  const [newWaterDaysPerYear, setNewWaterDaysPerYear] = useState('250');
+  const [newWaterHours, setNewWaterHours] = useState('2000');
+
+  useEffect(() => {
+    const hrs = Number(newWaterHrsPerShift) || 0;
+    const shifts = Number(newWaterShiftsPerDay) || 0;
+    const days = Number(newWaterDaysPerYear) || 0;
+    setNewWaterHours((hrs * shifts * days).toString());
+  }, [newWaterHrsPerShift, newWaterShiftsPerDay, newWaterDaysPerYear]);
 
   const [dmVs, setDmVs] = useState(initialState?.dmParams?.vs ?? '20');
   const [dmCfu, setDmCfu] = useState(initialState?.dmParams?.cfu ?? '0.5');
@@ -316,6 +437,9 @@ export default function App() {
 
   const [isSettingsExpanded, setIsSettingsExpanded] = useState(false);
   const [history, setHistory] = useLocalStorage<any[]>('graniteapp_history_v1', []);
+  const [customSaveName, setCustomSaveName] = useState<string>("TCR GRANITE");
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
+  const [resetSaveName, setResetSaveName] = useState("TCR GRANITE");
   const [toast, setToast] = useState<{message: string, type: 'success' | 'info' | 'error'} | null>(null);
 
   const showToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
@@ -325,9 +449,214 @@ export default function App() {
     return () => clearTimeout(timer);
   };
 
-  const handleSave = () => {
+  // Firebase auth & cloud studies state
+  const [fbUser, setFbUser] = useState<FirebaseUser | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [cloudStudies, setCloudStudies] = useState<any[]>([]);
+  const [isCloudLoading, setIsCloudLoading] = useState(false);
+
+  // Test connection to Firestore
+  useEffect(() => {
+    async function testConnection() {
+      try {
+        await getDocFromServer(doc(db, 'test', 'connection'));
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration.");
+        }
+      }
+    }
+    testConnection();
+  }, []);
+
+  // Fetch Cloud Saved Scenarios from Firestore
+  const fetchCloudStudies = async (uid: string) => {
+    setIsCloudLoading(true);
+    try {
+      const q = query(
+        collection(db, "studies"),
+        where("userId", "==", uid)
+      );
+      const querySnapshot = await getDocs(q);
+      const studies: any[] = [];
+      querySnapshot.forEach((docSnap) => {
+        studies.push({
+          id: docSnap.id,
+          ...docSnap.data()
+        });
+      });
+      // Sort in memory by lastSaved descending
+      studies.sort((a, b) => new Date(b.lastSaved).getTime() - new Date(a.lastSaved).getTime());
+      setCloudStudies(studies);
+    } catch (err) {
+      console.error("Error fetching cloud studies:", err);
+      showToast("Erreur lors de la récupération des sauvegardes Cloud", "error");
+    } finally {
+      setIsCloudLoading(false);
+    }
+  };
+
+  // Auth connection listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      setFbUser(u);
+      setIsAuthLoading(false);
+      if (u) {
+        fetchCloudStudies(u.uid);
+      } else {
+        setCloudStudies([]);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Sign in with Google Popup
+  const handleGoogleSignIn = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      const result = await signInWithPopup(auth, provider);
+      if (result.user) {
+        setFbUser(result.user);
+        showToast(`Bienvenue, ${result.user.displayName || "Utilisateur"} !`, "success");
+        fetchCloudStudies(result.user.uid);
+      }
+    } catch (err: any) {
+      console.error("Sign in failed:", err);
+      showToast("La connexion a échoué. Veuillez réessayer.", "error");
+    }
+  };
+
+  // Sign out
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      setFbUser(null);
+      setCloudStudies([]);
+      showToast("Déconnexion réussie.", "info");
+    } catch (err) {
+      console.error("Sign out failed:", err);
+      showToast("Erreur de déconnexion", "error");
+    }
+  };
+
+  // Save current scenario to Firestore Cloud
+  const handleSaveToCloud = async (name: string) => {
+    if (!fbUser) {
+      showToast("Veuillez vous connecter pour sauvegarder dans le cloud.", "error");
+      return;
+    }
+    const finalName = name.trim() || `TCR GRANITE - ${new Date().toLocaleDateString('fr-DZ')} ${new Date().toLocaleTimeString('fr-DZ')}`;
+    const path = "studies";
+    try {
+      const studyData = {
+        userId: fbUser.uid,
+        saveName: finalName,
+        userNotes: userNotes || '',
+        years,
+        equipments,
+        roles,
+        hrConfig,
+        machines,
+        opConfig,
+        electricityLines,
+        electricityConfig,
+        accessoryConfig,
+        waterConfig,
+        ibmRate,
+        priceGranite,
+        densityGranite,
+        priceTuf,
+        densityTuf,
+        decimalPlaces,
+        dmParams: { vs: dmVs, cfu: dmCfu, hj: dmHj, ja: dmJa, n: dmN },
+        productionConfig,
+        lastSaved: new Date().toISOString()
+      };
+
+      const newDocRef = doc(collection(db, "studies"));
+      await setDoc(newDocRef, studyData);
+      
+      showToast(`Scénario "${finalName}" enregistré dans le Cloud !`, "success");
+      fetchCloudStudies(fbUser.uid);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, path);
+    }
+  };
+
+  // Delete a cloud document
+  const handleDeleteFromCloud = async (studyId: string) => {
+    if (!fbUser) return;
+    const path = `studies/${studyId}`;
+    try {
+      await deleteDoc(doc(db, "studies", studyId));
+      showToast("Document Cloud supprimé", "success");
+      fetchCloudStudies(fbUser.uid);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, path);
+    }
+  };
+
+  // Synchronize internal localStorage history items to Firestore
+  const handleSyncLocalToCloud = async () => {
+    if (!fbUser) {
+      showToast("Connectez-vous d'abord pour synchroniser", "error");
+      return;
+    }
+    if (!Array.isArray(history) || history.length === 0) {
+      showToast("Aucun historique local à synchroniser", "info");
+      return;
+    }
+    
+    setIsCloudLoading(true);
+    let successCount = 0;
+    try {
+      for (const localSave of history) {
+        const alreadyExists = cloudStudies.some(c => c.saveName === localSave.saveName);
+        if (!alreadyExists) {
+          const studyData = {
+            userId: fbUser.uid,
+            saveName: localSave.saveName || "Sauvegarde sans nom",
+            userNotes: localSave.userNotes || '',
+            years: localSave.years || INITIAL_YEARS,
+            equipments: localSave.equipments || [],
+            roles: localSave.roles || [],
+            hrConfig: localSave.hrConfig || { socialChargesRate: 0.26, annualIncreaseRate: 0.03, paidMonths: 12 },
+            machines: localSave.machines || [],
+            opConfig: localSave.opConfig || { fuelPrice: 29, workDaysPerYear: 250, hoursPerDay: 8, annualInflationRate: 3 },
+            electricityLines: localSave.electricityLines || [],
+            electricityConfig: localSave.electricityConfig || { cosPhi: 0.8, kvaPerGroup: 500, specificConsumption: 0.30, workDaysPerYear: 250, hoursPerDay: 8 },
+            accessoryConfig: localSave.accessoryConfig || { items: [] },
+            waterConfig: localSave.waterConfig || INITIAL_WATER_CONFIG,
+            ibmRate: localSave.ibmRate ?? 0.12,
+            priceGranite: localSave.priceGranite ?? 4500,
+            densityGranite: localSave.densityGranite ?? 2.49,
+            priceTuf: localSave.priceTuf ?? 3500,
+            densityTuf: localSave.densityTuf ?? 2.39,
+            decimalPlaces: localSave.decimalPlaces ?? 2,
+            dmParams: localSave.dmParams || { vs: dmVs, cfu: dmCfu, hj: dmHj, ja: dmJa, n: dmN },
+            productionConfig: localSave.productionConfig || INITIAL_PROD_CONFIG,
+            lastSaved: localSave.lastSaved || new Date().toISOString()
+          };
+          const newDocRef = doc(collection(db, "studies"));
+          await setDoc(newDocRef, studyData);
+          successCount++;
+        }
+      }
+      showToast(`${successCount} sauvegardes locales synchronisées avec le Cloud !`, "success");
+      fetchCloudStudies(fbUser.uid);
+    } catch (err) {
+      console.error("Local-to-cloud sync failure:", err);
+      showToast("Une erreur est survenue lors de la synchronisation", "error");
+    } finally {
+      setIsCloudLoading(false);
+    }
+  };
+
+  const handleSave = (customName?: string) => {
     try {
       const stateToSave = {
+        saveName: customName,
         userNotes,
         years,
         equipments,
@@ -338,7 +667,13 @@ export default function App() {
         electricityLines,
         electricityConfig,
         accessoryConfig,
+        waterConfig,
         ibmRate,
+        priceGranite,
+        densityGranite,
+        priceTuf,
+        densityTuf,
+        decimalPlaces,
         dmParams: { vs: dmVs, cfu: dmCfu, hj: dmHj, ja: dmJa, n: dmN },
         productionConfig,
         lastSaved: new Date().toISOString()
@@ -352,12 +687,26 @@ export default function App() {
         return newHistory.slice(0, 50); // Keep last 50
       });
       
-      showToast("Projet enregistré & Historique mis à jour");
+      if (customName) {
+        showToast(`Version "${customName}" enregistrée dans l'historique !`);
+      } else {
+        showToast("Projet enregistré & Historique mis à jour");
+      }
     } catch (e) {
       console.error("Erreur lors de la sauvegarde :", e);
       alert("Erreur lors de la sauvegarde.");
     }
   };
+
+  useEffect(() => {
+    const hasTcrGranite = Array.isArray(history) && history.some((item: any) => item.saveName === "TCR GRANITE");
+    if (!hasTcrGranite) {
+      const timer = setTimeout(() => {
+        handleSave("TCR GRANITE");
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, []);
 
   const restoreFromHistory = (data: any) => {
     if (!data) return;
@@ -380,8 +729,19 @@ export default function App() {
       setElectricityLines(data.electricityLines ?? []);
       setElectricityConfig(data.electricityConfig ?? { cosPhi: 0.8, kvaPerGroup: 500, specificConsumption: 0.30, workDaysPerYear: 250, hoursPerDay: 8 });
       setAccessoryConfig(data.accessoryConfig ?? { items: [] });
+      setWaterConfig(data.waterConfig ?? INITIAL_WATER_CONFIG);
       setIbmRate(data.ibmRate ?? 0.12);
       setIbmRateInput(((data.ibmRate ?? 0.12) * 100).toString());
+      setPriceGranite(data.priceGranite ?? 4500);
+      setPriceGraniteInput((data.priceGranite ?? 4500).toString());
+      setDensityGranite(data.densityGranite ?? 2.49);
+      setDensityGraniteInput((data.densityGranite ?? 2.49).toString());
+      setPriceTuf(data.priceTuf ?? 3500);
+      setPriceTufInput((data.priceTuf ?? 3500).toString());
+      setDensityTuf(data.densityTuf ?? 2.39);
+      setDensityTufInput((data.densityTuf ?? 2.39).toString());
+      setDecimalPlaces(data.decimalPlaces ?? 2);
+      setDecimalPlacesInput((data.decimalPlaces ?? 2).toString());
       if (data.dmParams) {
         setDmVs(data.dmParams.vs ?? '20');
         setDmCfu(data.dmParams.cfu ?? '0.5');
@@ -415,8 +775,19 @@ export default function App() {
     setElectricityLines([]);
     setElectricityConfig({ cosPhi: 0.8, kvaPerGroup: 500, specificConsumption: 0.30, workDaysPerYear: 250, hoursPerDay: 8 });
     setAccessoryConfig({ items: [] });
+    setWaterConfig(INITIAL_WATER_CONFIG);
     setIbmRate(0.12);
     setIbmRateInput("12");
+    setPriceGranite(4500);
+    setPriceGraniteInput("4500");
+    setDensityGranite(2.49);
+    setDensityGraniteInput("2.49");
+    setPriceTuf(3500);
+    setPriceTufInput("3500");
+    setDensityTuf(2.39);
+    setDensityTufInput("2.39");
+    setDecimalPlaces(2);
+    setDecimalPlacesInput("2");
     setDmVs('1.5');
     setDmCfu('1');
     setDmHj('8');
@@ -426,12 +797,43 @@ export default function App() {
     setActiveTab('dashboard');
   }, []);
 
-  const handleResetData = useCallback(() => {
-    const confirmMessage = "Voulez-vous vraiment démarrer une nouvelle étude ?\nCela effacera toutes les données actuelles (sauf l'historique).\n\nهل تريد حقاً بدء دراسة جديدة؟ سيتم حذف جميع البيانات الحالية.";
-    if (!window.confirm(confirmMessage)) return;
-
+  const handleConfirmReset = useCallback((saveName: string) => {
     try {
-      // 1. Identify all state-related keys
+      const finalName = saveName.trim() || `TCR GRANITE - Sauvegarde Automatique`;
+      
+      const stateToSave = {
+        saveName: finalName,
+        userNotes,
+        years,
+        equipments,
+        roles,
+        hrConfig,
+        machines,
+        opConfig,
+        electricityLines,
+        electricityConfig,
+        accessoryConfig,
+        ibmRate,
+        priceGranite,
+        densityGranite,
+        priceTuf,
+        densityTuf,
+        decimalPlaces,
+        dmParams: { vs: dmVs, cfu: dmCfu, hj: dmHj, ja: dmJa, n: dmN },
+        productionConfig,
+        lastSaved: new Date().toISOString()
+      };
+      
+      // Save current state first (ensuring persistence)
+      window.localStorage.setItem(SAVE_KEY, JSON.stringify(stateToSave));
+      
+      // Update history in state & localStorage (guaranteeing the user's priority)
+      const currentHistory = Array.isArray(history) ? history : [];
+      const updatedHistory = [stateToSave, ...currentHistory].slice(0, 50);
+      window.localStorage.setItem('graniteapp_history_v1', JSON.stringify(updatedHistory));
+      setHistory(updatedHistory);
+
+      // Now prepare to reset all entries except history itself
       const keys = Object.keys(window.localStorage);
       const toRemove = keys.filter(k => 
         (k.startsWith('granite_') || k.startsWith('graniteapp_')) && 
@@ -439,31 +841,44 @@ export default function App() {
         k !== 'theme'
       );
       
-      // 2. Clear localStorage synchronously
+      // Remove all state data
       window.localStorage.removeItem(SAVE_KEY);
       toRemove.forEach(k => window.localStorage.removeItem(k));
       
-      // 3. Clear all memory state immediately (so UI reflects it before reload)
+      // Revert memory state
       resetToInitial();
       
-      // 4. Show a final toast success message 
-      showToast("جاري بدء دراسة جديدة...", "success");
+      showToast("Nouvelle étude démarrée et étude en cours sauvegardée !", "success");
+      setIsResetConfirmOpen(false);
       
-      // 5. Short delay before reload to allow state clearing to persist and show toast
+      // Safe reload delay
       setTimeout(() => {
         try {
           window.location.replace(window.location.origin + window.location.pathname);
         } catch (e) {
           window.location.reload();
         }
-      }, 500);
+      }, 700);
 
     } catch (error) {
       console.error("Critical reset failure:", error);
       resetToInitial();
-      showToast("حدث خطأ، تم التصفير يدوياً", "error");
+      showToast("Une erreur est survenue lors de la réinitialisation.", "error");
     }
-  }, [resetToInitial]);
+  }, [
+    history, setHistory, resetToInitial, userNotes, years, equipments, roles, hrConfig, 
+    machines, opConfig, electricityLines, electricityConfig, accessoryConfig, waterConfig, 
+    ibmRate, priceGranite, densityGranite, priceTuf, densityTuf, decimalPlaces, 
+    dmVs, dmCfu, dmHj, dmJa, dmN, productionConfig
+  ]);
+
+  const handleResetData = useCallback(() => {
+    // Set a neat default name with the current Arabic/French date
+    const dateStr = new Date().toLocaleDateString('fr-DZ', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const timeStr = new Date().toLocaleTimeString('fr-DZ', { hour: '2-digit', minute: '2-digit' }).replace(':', 'h');
+    setResetSaveName(`TCR GRANITE - ${dateStr} ${timeStr}`);
+    setIsResetConfirmOpen(true);
+  }, []);
   
   // Error states for form validation
   const [newEqErrors, setNewEqErrors] = useState<{name?: string, price?: string, duration?: string}>({});
@@ -517,10 +932,13 @@ export default function App() {
   // 5. Calculate Accessory Costs
   const accessoryResults = useMemo(() => getAccessoryCosts(accessoryConfig, opConfig.annualInflationRate), [accessoryConfig, opConfig.annualInflationRate]);
 
+  // 5b. Calculate Water Costs
+  const waterResults = useMemo(() => getWaterCosts(waterConfig), [waterConfig]);
+
   // 6. Final TCR Calculation (using the manual data + automated overrides inside calculateYear)
   const calculatedYears = useMemo(() => 
-    years.map((y, idx) => calculateYear(y, ibmRate, opResults.fuel, opResults.maintenance, hrTotals, amortResults.annualTotals, electricityResults, accessoryResults, idx)), 
-  [years, ibmRate, opResults, hrTotals, amortResults, electricityResults, accessoryResults]);
+    years.map((y, idx) => calculateYear(y, ibmRate, opResults.fuel, opResults.maintenance, hrTotals, amortResults.annualTotals, electricityResults, accessoryResults, idx, priceGranite, densityGranite, priceTuf, densityTuf, decimalPlaces, waterResults.annualCosts)), 
+  [years, ibmRate, opResults, hrTotals, amortResults, electricityResults, accessoryResults, priceGranite, densityGranite, priceTuf, densityTuf, decimalPlaces, waterResults]);
 
   const totalRow = useMemo(() => calculateTotals(calculatedYears), [calculatedYears]);
   
@@ -736,6 +1154,163 @@ export default function App() {
     });
   };
 
+  // Water Consumption handlers
+  const [newWaterErrors, setNewWaterErrors] = useState<{name?: string, flow?: string, hrsPerShift?: string, shiftsPerDay?: string, daysPerYear?: string}>({});
+
+  const addWaterItem = () => {
+    const errors: {name?: string, flow?: string, hrsPerShift?: string, shiftsPerDay?: string, daysPerYear?: string} = {};
+    if (!newWaterName.trim()) errors.name = "Désignation obligatoire";
+    if (newWaterFlow === '' || Number(newWaterFlow) < 0) errors.flow = "Débit invalide (min 0)";
+    
+    const hrsVal = Number(newWaterHrsPerShift) || 0;
+    const shiftsVal = Number(newWaterShiftsPerDay) || 0;
+    const daysVal = Number(newWaterDaysPerYear) || 0;
+
+    if (hrsVal <= 0) errors.hrsPerShift = "Invalide (min > 0)";
+    if (shiftsVal <= 0) errors.shiftsPerDay = "Invalide (min > 0)";
+    if (daysVal <= 0) errors.daysPerYear = "Invalide (min > 0)";
+
+    if (Object.keys(errors).length > 0) {
+      setNewWaterErrors(errors);
+      return;
+    }
+
+    const flowVal = Math.max(0, Number(newWaterFlow));
+    const hVal = hrsVal * shiftsVal * daysVal;
+
+    const newItem: WaterItem = {
+      id: Math.random().toString(36).substring(2, 11),
+      designation: newWaterName,
+      flowRate: flowVal,
+      hoursPerYear: hVal,
+      hoursPerShift: hrsVal,
+      shiftsPerDay: shiftsVal,
+      daysPerYear: daysVal,
+      hasCustomHours: false,
+      customHours: Array(10).fill(hVal)
+    };
+
+    setWaterConfig({
+      ...waterConfig,
+      items: [...waterConfig.items, newItem]
+    });
+
+    setNewWaterName('');
+    setNewWaterFlow('');
+    setNewWaterHrsPerShift('8');
+    setNewWaterShiftsPerDay('1');
+    setNewWaterDaysPerYear('250');
+    setNewWaterErrors({});
+    showToast("Poste de consommation d'eau ajouté");
+  };
+
+  const removeWaterItem = (id: string) => {
+    setWaterConfig({
+      ...waterConfig,
+      items: waterConfig.items.filter(item => item.id !== id)
+    });
+    showToast("Poste supprimé");
+  };
+
+  const updateWaterItemField = (id: string, field: keyof WaterItem | 'hoursPerShift' | 'shiftsPerDay' | 'daysPerYear', value: any) => {
+    setWaterConfig(prev => {
+      const updated = prev.items.map(item => {
+        if (item.id === id) {
+          let updatedItem = { ...item } as any;
+          if (field === 'flowRate') {
+            updatedItem.flowRate = Math.max(0, Number(value) || 0);
+          } else if (field === 'hoursPerYear') {
+            const hVal = Math.max(0, Number(value) || 0);
+            updatedItem.hoursPerYear = hVal;
+            if (!item.hasCustomHours) {
+              updatedItem.customHours = Array(10).fill(hVal);
+            }
+          } else if (field === 'hoursPerShift' || field === 'shiftsPerDay' || field === 'daysPerYear') {
+            const currentHShift = field === 'hoursPerShift' ? Number(value) : (item.hoursPerShift ?? 8);
+            const currentSDay = field === 'shiftsPerDay' ? Number(value) : (item.shiftsPerDay ?? 1);
+            const currentDYear = field === 'daysPerYear' ? Number(value) : (item.daysPerYear ?? 250);
+            
+            const calculatedHours = Math.max(0, currentHShift * currentSDay * currentDYear);
+            
+            updatedItem.hoursPerShift = currentHShift;
+            updatedItem.shiftsPerDay = currentSDay;
+            updatedItem.daysPerYear = currentDYear;
+            updatedItem.hoursPerYear = calculatedHours;
+            
+            if (!item.hasCustomHours) {
+              updatedItem.customHours = Array(10).fill(calculatedHours);
+            }
+          } else {
+            updatedItem[field] = value;
+          }
+          return updatedItem as WaterItem;
+        }
+        return item;
+      });
+      return { ...prev, items: updated };
+    });
+  };
+
+  const toggleWaterItemCustomHours = (id: string) => {
+    setWaterConfig(prev => {
+      const updated = prev.items.map(item => {
+        if (item.id === id) {
+          const hasCustom = !item.hasCustomHours;
+          return {
+            ...item,
+            hasCustomHours: hasCustom,
+            customHours: hasCustom ? [...item.customHours] : Array(10).fill(item.hoursPerYear)
+          };
+        }
+        return item;
+      });
+      return { ...prev, items: updated };
+    });
+  };
+
+  const updateWaterItemCustomHourCell = (id: string, yearIdx: number, val: any) => {
+    setWaterConfig(prev => {
+      const updated = prev.items.map(item => {
+        if (item.id === id) {
+          const hours = [...item.customHours];
+          hours[yearIdx] = Math.max(0, Number(val) || 0);
+          return { ...item, customHours: hours };
+        }
+        return item;
+      });
+      return { ...prev, items: updated };
+    });
+  };
+
+  const updateWaterGlobalPrice = (val: any) => {
+    const priceVal = Math.max(0, Number(val) || 0);
+    setWaterConfig(prev => ({
+      ...prev,
+      globalPrice: priceVal,
+      customPrices: prev.hasCustomPrices ? prev.customPrices : Array(10).fill(priceVal)
+    }));
+  };
+
+  const toggleWaterCustomPrices = () => {
+    setWaterConfig(prev => {
+      const hasCustom = !prev.hasCustomPrices;
+      return {
+        ...prev,
+        hasCustomPrices: hasCustom,
+        customPrices: hasCustom ? [...prev.customPrices] : Array(10).fill(prev.globalPrice)
+      };
+    });
+  };
+
+  const updateWaterCustomPriceCell = (yearIdx: number, val: any) => {
+    const priceVal = Math.max(0, Number(val) || 0);
+    setWaterConfig(prev => {
+      const prices = [...prev.customPrices];
+      prices[yearIdx] = priceVal;
+      return { ...prev, customPrices: prices };
+    });
+  };
+
   const updateAccessoryField = (id: string, field: keyof AccessoryItem, value: any) => {
     setAccessoryConfig(prev => ({
       ...prev,
@@ -861,8 +1436,10 @@ export default function App() {
     };
 
     const rows = [
-      ["EXTRACTION GRANITE (T)", ...calculatedYears.map(y => y.extractionGranite), totalRow.extractionGranite],
+      ["EXTRACTION GRANITE (m³)", ...calculatedYears.map(y => y.extractionGranite), totalRow.extractionGranite],
+      ["POIDS EXTRAIT GRANITE (T)", ...calculatedYears.map(y => (y.extractionGranite || 0) * densityGranite), (totalRow.extractionGranite || 0) * densityGranite],
       ["EXTRACTION TUF (T)", ...calculatedYears.map(y => y.extractionTuf), totalRow.extractionTuf],
+      ["VOLUME EXTRAIT TUF (m³)", ...calculatedYears.map(y => densityTuf > 0 ? (y.extractionTuf || 0) / densityTuf : 0), densityTuf > 0 ? (totalRow.extractionTuf || 0) / densityTuf : 0],
       ["CHIFFRE D'AFFAIRES GRANITE (DA)", ...calculatedYears.map(y => y.caGranite), totalRow.caGranite],
       ["CHIFFRE D'AFFAIRES TUF (DA)", ...calculatedYears.map(y => y.caTuf), totalRow.caTuf],
       ["CHIFFRE D'AFFAIRES GLOBAL (DA)", ...calculatedYears.map(y => y.caGlobal), totalRow.caGlobal],
@@ -879,7 +1456,7 @@ export default function App() {
       ["Impots sur les Benefices (IBM) (DA)", ...calculatedYears.map(y => y.ibm), totalRow.ibm],
       ["RESULTAT NET DE L'EXERCICE (DA)", ...calculatedYears.map(y => y.resultatNet), totalRow.resultatNet],
       ["CAPACITE D'AUTOFINANCEMENT (FNT) (DA)", ...calculatedYears.map(y => y.fnt), totalRow.fnt],
-      ["PRIX DE REVIENT GRANITE (DA/T)", ...calculatedYears.map(y => y.prixRevientGranite), totalRow.prixRevientGranite],
+      ["PRIX DE REVIENT GRANITE (DA/m³)", ...calculatedYears.map(y => y.prixRevientGranite), totalRow.prixRevientGranite],
       ["PRIX DE REVIENT TUF (DA/T)", ...calculatedYears.map(y => y.prixRevientTuf), totalRow.prixRevientTuf],
     ];
 
@@ -921,7 +1498,7 @@ export default function App() {
       })
     ];
 
-    const formatCurrencyDoc = (n: number) => (n / 1000).toLocaleString('fr-DZ', { maximumFractionDigits: 2, minimumFractionDigits: 0 }) + " milliers de DA";
+    const formatCurrencyDoc = (n: number) => (n / 1000).toLocaleString('fr-DZ', { maximumFractionDigits: 2, minimumFractionDigits: 0 }) + " kDA";
     const formatValueDoc = (n: number) => (n / 1000).toLocaleString('fr-DZ', { maximumFractionDigits: 2, minimumFractionDigits: 0 });
 
     if (activeTab === 'invest') {
@@ -936,9 +1513,9 @@ export default function App() {
       sections.push(new Paragraph({ text: "2. Tableau Récapitulatif des Équipements", heading: HeadingLevel.HEADING_2, spacing: { before: 300, after: 200 } }));
       const summaryHeaders = [
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Désignation", bold: true })] })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Prix Unitaire (En milliers de DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Prix Unitaire (kDA)", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Durée (Ans)", bold: true })] })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Amort. Annuel (En milliers de DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Amort. Annuel (kDA)", bold: true })] })] }),
       ];
       const summaryRowsItems = [new TableRow({ children: summaryHeaders })];
       equipments.forEach(eq => {
@@ -956,7 +1533,7 @@ export default function App() {
       const headers = [
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Désignation des équipements", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Durée", bold: true })] })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Amort./An (En milliers de DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Amort./An (kDA)", bold: true })] })] }),
         ...Array.from({length: 10}).map((_, i) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: `${i+1}Année`, bold: true })] })] }))
       ];
 
@@ -983,7 +1560,7 @@ export default function App() {
 
       // Total Row
       rows.push(new TableRow({ children: [
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL (En milliers de DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL (kDA)", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ text: "" })] }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: formatValueDoc(totalAnnualAmort), bold: true })] })] }),
         ...totals.map(t => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: formatValueDoc(t), bold: true })] })] }))
@@ -991,7 +1568,7 @@ export default function App() {
 
       sections.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows }));
       sections.push(new Paragraph({ 
-        children: [new TextRun({ text: "* Toutes les valeurs financières sont exprimées en milliers de DA.", italics: true })],
+        children: [new TextRun({ text: "* Toutes les valeurs financières sont exprimées en kDA.", italics: true })],
         spacing: { before: 200 } 
       }));
     } 
@@ -1059,7 +1636,7 @@ export default function App() {
 
       // Total Row
       rows.push(new TableRow({ children: [
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL MASSE SALARIALE (En milliers de DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL MASSE SALARIALE (kDA)", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ text: "" })] }),
         ...columnTotals.map(t => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: formatValueDoc(t), bold: true })] })] }))
       ] }));
@@ -1123,7 +1700,7 @@ export default function App() {
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Puiss. (kW)", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "L/h (Unit)", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Unités", bold: true })] })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Coût Annuel (En milliers de DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Coût Annuel (kDA)", bold: true })] })] }),
       ];
       const summaryRowsItems = [new TableRow({ children: summaryHeaders })];
       machines.forEach(m => {
@@ -1166,7 +1743,7 @@ export default function App() {
 
       // Total Row
       rows.push(new TableRow({ children: [
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL FUEL (En milliers de DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL FUEL (kDA)", bold: true })] })] }),
         ...columnTotals.map(t => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: formatValueDoc(t), bold: true })] })] }))
       ] }));
 
@@ -1182,7 +1759,7 @@ export default function App() {
       const summaryHeaders = [
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Ligne / Équipement", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Puissance (kW)", bold: true })] })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Coût Annuel Estimé (En milliers de DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Coût Annuel Estimé (kDA)", bold: true })] })] }),
       ];
       const summaryRowsItems = [new TableRow({ children: summaryHeaders })];
       electricityLines.forEach(l => {
@@ -1224,7 +1801,7 @@ export default function App() {
 
       // Total Row
       rows.push(new TableRow({ children: [
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL ELEC (En milliers de DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL ELEC (kDA)", bold: true })] })] }),
         ...columnTotals.map(t => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: formatValueDoc(t), bold: true })] })] }))
       ] }));
 
@@ -1240,7 +1817,7 @@ export default function App() {
       const summaryHeaders = [
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Désignation", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Unité", bold: true })] })] }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Prix Unit. (En milliers de DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Prix Unit. (kDA)", bold: true })] })] }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Qté / An", bold: true })] })] }),
       ];
       const summaryRowsItems = [new TableRow({ children: summaryHeaders })];
@@ -1280,8 +1857,60 @@ export default function App() {
 
       // Total Row
       rows.push(new TableRow({ children: [
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL ACC. (En milliers de DA)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "TOTAL ACC. (kDA)", bold: true })] })] }),
         ...columnTotals.map(t => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: formatValueDoc(t), bold: true })] })] }))
+      ] }));
+
+      sections.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows }));
+    }
+    else if (activeTab === 'water') {
+      sections.push(...createHeader("RAPPORT DE CONSOMMATION D'EAU", "Détail de la consommation d'eau et de la tarification sur 10 ans"));
+      
+      sections.push(new Paragraph({ text: "1. Méthodologie", heading: HeadingLevel.HEADING_2 }));
+      sections.push(new Paragraph({ 
+        text: `La consommation d'eau est estimée selon le débit requis (L/h) pour chaque poste d'utilisation, multiplié par ses heures de fonctionnement annuelles. Le coût est calculé en appliquant le prix unitaire de l'eau (DA/m³). Le prix global de l'eau configuré est de ${waterConfig.globalPrice || 40.95} DA/m³.`, 
+        spacing: { after: 200 } 
+      }));
+
+      sections.push(new Paragraph({ text: "2. Tableau Récapitulatif des Postes de Consommation", heading: HeadingLevel.HEADING_2, spacing: { before: 300, after: 200 } }));
+      const summaryHeaders = [
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Désignation", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Débit (L/h)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Vol. Unitaire (m³/h)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Dimensionnement (h/poste × postes/j × j/an)", bold: true })] })] }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Heures / An", bold: true })] })] }),
+      ];
+      const summaryRowsItems = [new TableRow({ children: summaryHeaders })];
+      (waterConfig.items || []).forEach(item => {
+        summaryRowsItems.push(new TableRow({ children: [
+          new TableCell({ children: [new Paragraph({ text: item.designation ?? "" })] }),
+          new TableCell({ children: [new Paragraph({ text: (item.flowRate ?? 0).toString() })] }),
+          new TableCell({ children: [new Paragraph({ text: ((item.flowRate ?? 0) / 1000).toLocaleString('fr-DZ', { maximumFractionDigits: 2 }) })] }),
+          new TableCell({ children: [new Paragraph({ text: `${item.hoursPerShift ?? 8}h × ${item.shiftsPerDay ?? 1}p × ${item.daysPerYear ?? 250}j` })] }),
+          new TableCell({ children: [new Paragraph({ text: (item.hoursPerYear ?? 2000).toString() })] }),
+        ] }));
+      });
+      sections.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: summaryRowsItems }));
+
+      sections.push(new Paragraph({ text: "3. Tableau de Projection des Consommations sur 10 Ans", heading: HeadingLevel.HEADING_2, spacing: { before: 400, after: 200 } }));
+
+      const headers = [
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Indicateur", bold: true })] })] }),
+        ...Array.from({length: 10}).map((_, i) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: `${i+1}e Année`, bold: true })] })] }))
+      ];
+
+      const rows = [new TableRow({ children: headers })];
+
+      // Row for Volume Total (m³/an)
+      rows.push(new TableRow({ children: [
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Volume d'eau total (m³/an)", bold: true })] })] }),
+        ...waterResults.annualVolumes.map(vol => new TableCell({ children: [new Paragraph({ text: vol.toLocaleString('fr-DZ', { maximumFractionDigits: 2 }) })] }))
+      ] }));
+
+      // Row for Coût de l'eau (m DA/an)
+      rows.push(new TableRow({ children: [
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Coût de l'eau (kDA)", bold: true })] })] }),
+        ...waterResults.annualCosts.common.map(cost => new TableCell({ children: [new Paragraph({ text: formatValueDoc(cost) })] }))
       ] }));
 
       sections.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows }));
@@ -1312,7 +1941,7 @@ export default function App() {
       ];
       sections.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: summaryRowsItems }));
 
-      sections.push(new Paragraph({ text: "3. Tableau Détaillé du TCR sur 10 Ans (En milliers de DA)", heading: HeadingLevel.HEADING_2, spacing: { before: 400, after: 200 } }));
+      sections.push(new Paragraph({ text: "3. Tableau Détaillé du TCR sur 10 Ans (kDA)", heading: HeadingLevel.HEADING_2, spacing: { before: 400, after: 200 } }));
       
       const headersArr = [
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Compte", bold: true })] })] }),
@@ -1351,7 +1980,7 @@ export default function App() {
       const summaryRows = [
         new TableRow({ children: [
           new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Indicateur", bold: true })] })] }),
-          new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Valeur Cumulée (10 Ans) (En milliers de DA)", bold: true })] })] }),
+          new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Valeur Cumulée (10 Ans) (kDA)", bold: true })] })] }),
         ] }),
         new TableRow({ children: [
           new TableCell({ children: [new Paragraph({ text: "Chiffre d'Affaires Global" })] }),
@@ -1414,6 +2043,7 @@ export default function App() {
             <NavItem active={activeTab === 'ops'} onClick={() => setActiveTab('ops')} icon={<Fuel size={18} />} label="Carburant & Maint." />
             <NavItem active={activeTab === 'elec'} onClick={() => setActiveTab('elec')} icon={<Zap size={18} />} label="Électricité" />
             <NavItem active={activeTab === 'acc'} onClick={() => setActiveTab('acc')} icon={<PlusCircle size={18} />} label="Coûts Accessoires" />
+            <NavItem active={activeTab === 'water'} onClick={() => setActiveTab('water')} icon={<Droplets size={18} />} label="Consommation d'eau" />
             <div className="h-px bg-white/5 my-4 mx-4"></div>
             <NavItem active={activeTab === 'edit'} onClick={() => setActiveTab('edit')} icon={<Edit3 size={18} />} label="Saisie TCR" />
             <NavItem active={activeTab === 'table'} onClick={() => setActiveTab('table')} icon={<TableIcon size={18} />} label="Rapports TCR" />
@@ -1509,6 +2139,113 @@ export default function App() {
             </div>
           )}
         </AnimatePresence>
+
+        {/* Custom Confirmation Dialog for Restart/New Study */}
+        <AnimatePresence>
+          {isResetConfirmOpen && (
+            <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4">
+              {/* Backdrop */}
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setIsResetConfirmOpen(false)}
+                className="fixed inset-0 bg-slate-950/85 backdrop-blur-md"
+              />
+              
+              {/* Dialog Content */}
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95, y: 30 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 15 }}
+                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                className="relative bg-sleek-card border border-sleek-border w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl z-10 flex flex-col overflow-hidden text-left"
+                dir="ltr"
+              >
+                {/* Decorative border */}
+                <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-red-500 via-amber-500 to-indigo-500" />
+                
+                <div className="flex items-center gap-4 border-b border-sleek-border/50 pb-5 mb-5 justify-between flex-row">
+                  <div className="flex flex-col text-left">
+                    <h3 className="text-xl font-black text-sleek-text-main flex items-center gap-2 justify-start">
+                      Nouvelle Étude
+                    </h3>
+                    <p className="text-[10px] uppercase font-bold text-sleek-text-muted opacity-55 tracking-wider">Réinitialisation complète</p>
+                  </div>
+                  <div className="p-3 bg-red-500/10 rounded-2xl text-red-500">
+                    <Trash2 size={24} className="animate-pulse" />
+                  </div>
+                </div>
+
+                <div className="space-y-4 text-sm text-sleek-text-muted/90 flex flex-col font-medium leading-relaxed">
+                  <p className="text-xs bg-indigo-500/5 text-indigo-400 border border-indigo-500/10 rounded-2xl p-4 text-left leading-relaxed font-black">
+                    Cette action réinitialisera tous les chiffres et les saisies pour démarrer une nouvelle étude.
+                    <br /><br />
+                    <strong className="text-indigo-300">Rassurez-vous :</strong> les données actuelles de l'application seront automatiquement et solidement sauvegardées dans votre historique avant d'être effacées de l'écran. Vous pourrez les consulter ou les restaurer à tout moment.
+                  </p>
+                  
+                  <div className="space-y-2 mt-2 text-left">
+                    <label className="text-[11px] font-black uppercase tracking-wider text-indigo-400 block mb-1">
+                      Nom de la sauvegarde avant réinitialisation
+                    </label>
+                    <input 
+                      type="text"
+                      dir="ltr"
+                      value={resetSaveName}
+                      onChange={(e) => setResetSaveName(e.target.value)}
+                      placeholder="Exemple: TCR GRANITE"
+                      className="w-full bg-sleek-bg border border-sleek-border rounded-xl px-4 py-3.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-sleek-text-main text-left font-black placeholder:text-sleek-text-muted/30"
+                    />
+                    <div className="flex gap-2 justify-start mt-2">
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          const dateStr = new Date().toLocaleDateString('fr-DZ', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                          const timeStr = new Date().toLocaleTimeString('fr-DZ', { hour: '2-digit', minute: '2-digit' }).replace(':', 'h');
+                          setResetSaveName(`TCR GRANITE - ${dateStr} ${timeStr}`);
+                        }}
+                        className="px-3 py-1.5 bg-sleek-bg hover:bg-sleek-bg/80 border border-sleek-border rounded-lg text-[10px] font-bold text-sleek-text-muted transition-all active:scale-95"
+                      >
+                        Insérer Date & Heure
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setResetSaveName("TCR GRANITE")}
+                        className="px-3 py-1.5 bg-sleek-bg hover:bg-sleek-bg/80 border border-sleek-border rounded-lg text-[10px] font-bold text-sleek-text-muted transition-all active:scale-95"
+                      >
+                        TCR GRANITE par défaut
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Confirm & Cancel Actions */}
+                <div className="flex gap-3 mt-8 border-t border-sleek-border/40 pt-5 flex-row">
+                  <button 
+                    onClick={() => setIsResetConfirmOpen(false)}
+                    className="flex-1 py-4 text-xs bg-sleek-bg border border-sleek-border rounded-xl font-bold uppercase tracking-wider text-sleek-text-muted hover:border-white/20 hover:text-sleek-text-main transition-all active:scale-95"
+                  >
+                    Annuler
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const name = resetSaveName.trim();
+                      if (!name) {
+                        showToast("Veuillez saisir un nom pour la sauvegarde.", "error");
+                        return;
+                      }
+                      handleConfirmReset(name);
+                    }}
+                    className="flex-1 py-4 text-xs bg-red-600 hover:bg-red-700 text-white rounded-xl font-black uppercase tracking-wider shadow-xl shadow-red-600/30 transition-all flex items-center justify-center gap-2 active:scale-95"
+                  >
+                    <Check size={14} />
+                    Sauvegarder &amp; Réinitialiser
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
         {/* Header */}
         <header className="p-8 pb-6 flex items-center justify-between shrink-0 border-b border-sleek-border bg-sleek-card shadow-modern-sm transition-colors duration-300">
           <div className="flex flex-col gap-1">
@@ -1521,6 +2258,7 @@ export default function App() {
                {activeTab === 'ops' && "Operations"}
                {activeTab === 'elec' && "Energy"}
                {activeTab === 'acc' && "Consumables"}
+               {activeTab === 'water' && "Water"}
                {activeTab === 'edit' && "Calculations"}
                {activeTab === 'table' && "Reporting"}
                {activeTab === 'charts' && "Analytics"}
@@ -1537,6 +2275,7 @@ export default function App() {
               {activeTab === 'ops' && "Fuel & Maintenance"}
               {activeTab === 'elec' && "Électricité & Energie"}
               {activeTab === 'acc' && "Coûts Accessoires"}
+              {activeTab === 'water' && "Consommation d'eau"}
               {activeTab === 'edit' && "Prévisions d'Exploitation"}
               {activeTab === 'table' && "Analyse des Résultats"}
               {activeTab === 'charts' && "Visualisation Graphique"}
@@ -1580,8 +2319,8 @@ export default function App() {
         <div className="px-8 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6 shrink-0">
           <CompactStatCard 
             label="Tonnage Total" 
-            value={`${formatCurrency(totalRow.extractionGranite + totalRow.extractionTuf)} T`} 
-            formula="Somme totale des quantités extraites (Granite + Tuf) sur la période du projet."
+            value={`${formatCurrency((totalRow.extractionGranite * densityGranite) + totalRow.extractionTuf)} T`} 
+            formula="Poids total (Tonne) extrait sur 10 ans : (Volume Granite × Densité) + Tonnage Tuf."
           />
           <CompactStatCard 
             label="CA Global (10 ans)" 
@@ -1589,8 +2328,8 @@ export default function App() {
             formula="Chiffre d'Affaires Global : Somme de tous les revenus générés par la vente des matériaux."
           />
           <CompactStatCard label="Cash-Flow (FNT)" value={`${formatCurrency(totalRow.fnt / 1000000)} M DA`} formula="Formule : Résultat Net + Dotations aux Amortissements" />
-          <CompactStatCard label="Revient Granite" value={formatCompact(totalRow.prixRevientGranite)} formula="(Direct G. + Communs) / Tonnage" />
-          <CompactStatCard label="Revient Tuf" value={formatCompact(totalRow.prixRevientTuf)} formula="(Direct T. + Communs) / Tonnage" />
+          <CompactStatCard label="Revient Granite" value={`${formatCompact(totalRow.prixRevientGranite)} DA/m³`} formula="(Direct G. + Communs) / Volume (m³)" />
+          <CompactStatCard label="Revient Tuf" value={`${formatCompact(totalRow.prixRevientTuf)} DA/T`} formula="(Direct T. + Communs) / Tonnage (T)" />
         </div>
 
         {/* Views */}
@@ -1619,8 +2358,8 @@ export default function App() {
                     icon={<TrendingDown className="text-orange-500" />} 
                     label="Coût Revient Granite" 
                     value={formatCompact(totalRow.prixRevientGranite)} 
-                    suffix="DA/T" 
-                    formula="(Direct(G) + Quote-part Communs) / Tonnage(G)"
+                    suffix="DA/m³" 
+                    formula="(Direct(G) + Quote-part Communs) / Volume(G)"
                   />
                   <DashboardKPI 
                     icon={<TrendingDown className="text-amber-500" />} 
@@ -3471,13 +4210,377 @@ export default function App() {
                          title="Accessoires & Consommables Divers"
                          description={
                            <>
-                              Cette section permet d'inclure des consommables spécifiques (comme le fil diamanté, les couronnes, ou câbles) qui ne sont pas classés comme carburant mais affectent directement la marge opérationnelle.
-                              Le total annuel est injecté dans le poste <b>Matières & Consommables</b> du TCR.
-                           </>
-                         }
-                         className="mt-8"
-                       />
-                   </div>
+                               Cette section permet d'inclure des consommables spécifiques (comme le fil diamanté, les couronnes, ou câbles) qui ne sont pas classés comme carburant mais affectent directement la marge opérationnelle.
+                               Le total annuel est injecté dans le poste <b>Matières&nbsp;&amp;&nbsp;Consommables</b> du TCR.
+                            </>
+                          }
+                          className="mt-8"
+                        />
+                    </div>
+                 </div>
+               </motion.div>
+             )}
+
+            {activeTab === 'water' && (
+              <motion.div 
+                key="water" 
+                initial={{ opacity: 0, y: 15 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                exit={{ opacity: 0, scale: 0.98 }} 
+                transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                className="flex-1 flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar min-h-0 relative font-sans"
+              >
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 shrink-0">
+                  {/* Left Column: Form & General Parameters */}
+                  <div className="lg:col-span-4 bg-sleek-card p-6 rounded-2xl border border-sleek-border shadow-md overflow-y-auto max-h-[calc(100vh-220px)] custom-scrollbar flex flex-col gap-6">
+                    <div>
+                      <h3 className="text-sm font-bold flex items-center gap-2 text-sleek-text-main"><Droplets size={16} className="text-sleek-primary"/> Approvisionnement & Formulaire</h3>
+                      <p className="text-[10px] text-sleek-text-muted mt-1">Configurez le prix de l'eau et enregistrez de nouveaux postes de consommation.</p>
+                    </div>
+
+                    {/* Paramètres d'approvisionnement en eau */}
+                    <div className="bg-sleek-bg p-4 rounded-xl border border-sleek-border space-y-4">
+                      <div className="flex flex-col gap-2">
+                        <label className="text-[10px] font-bold text-sleek-text-muted uppercase tracking-wider">Prix de l'eau (DA/m³)</label>
+                        <div className="relative">
+                          <input 
+                            type="number"
+                            step="0.01"
+                            value={waterConfig.globalPrice || ''}
+                            onChange={(e) => updateWaterGlobalPrice(e.target.value)}
+                            className="w-full bg-sleek-card text-sleek-text-main pl-4 pr-16 py-2.5 rounded-xl border border-sleek-border focus:border-sleek-primary focus:outline-none transition-colors font-mono font-bold text-xs"
+                          />
+                          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-sleek-text-muted uppercase">DA/m³</span>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-3 bg-sleek-card border border-sleek-border p-3.5 rounded-xl">
+                        <input 
+                          type="checkbox"
+                          id="chkWaterCustomPrices"
+                          checked={waterConfig.hasCustomPrices}
+                          onChange={toggleWaterCustomPrices}
+                          className="w-4 h-4 rounded text-sleek-primary border-sleek-border bg-sleek-bg focus:ring-0 focus:ring-offset-0 transition-all cursor-pointer"
+                        />
+                        <label htmlFor="chkWaterCustomPrices" className="text-xs font-semibold text-sleek-text-main cursor-pointer select-none">
+                          Prix personnalisés par an
+                        </label>
+                      </div>
+
+                      {waterConfig.hasCustomPrices && (
+                        <div className="pt-2 border-t border-sleek-border/50">
+                          <span className="text-[9px] text-sleek-text-muted uppercase font-bold tracking-widest block mb-2">Prix unitaire par exercice (DA/m³)</span>
+                          <div className="grid grid-cols-2 gap-2">
+                            {Array.from({ length: 10 }).map((_, yearIdx) => {
+                              const val = waterConfig.customPrices?.[yearIdx] ?? waterConfig.globalPrice ?? 40.95;
+                              return (
+                                <div key={yearIdx} className="flex gap-2 items-center bg-sleek-card p-1.5 rounded-lg border border-sleek-border/70">
+                                  <span className="text-[9px] font-bold text-sleek-text-muted min-w-[28px]">An {yearIdx + 1}</span>
+                                  <input 
+                                    type="number"
+                                    step="0.01"
+                                    value={val}
+                                    onChange={(e) => updateWaterCustomPriceCell(yearIdx, e.target.value)}
+                                    className="w-full bg-sleek-bg text-center rounded p-1 font-mono text-[10px] font-bold text-sleek-text-main focus:outline-none focus:border-sleek-primary transition-all text-black font-semibold"
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Formulaire d'ajout de poste */}
+                    <div className="pt-5 border-t border-sleek-border">
+                      <h4 className="text-[10px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-60 mb-4 flex items-center gap-2"><PlusCircle size={12}/> Ajouter un Poste de Consommation</h4>
+                      <div className="space-y-4">
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-sleek-text-muted">Désignation / Utilisation</label>
+                          <input 
+                            type="text"
+                            placeholder="e.g., Fil diamanté, Lavage..."
+                            value={newWaterName}
+                            onChange={(e) => setNewWaterName(e.target.value)}
+                            className={`bg-sleek-bg text-sleek-text-main px-4 py-2.5 rounded-xl border text-xs focus:outline-none transition-all ${newWaterErrors.name ? 'border-red-500' : 'border-sleek-border focus:border-sleek-primary'}`}
+                          />
+                          {newWaterErrors.name && <span className="text-[10px] text-red-500 font-bold">{newWaterErrors.name}</span>}
+                        </div>
+
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-sleek-text-muted">Débit d'eau requis (L/h)</label>
+                          <div className="relative">
+                            <input 
+                              type="number"
+                              placeholder="e.g., 1500"
+                              value={newWaterFlow}
+                              onChange={(e) => setNewWaterFlow(e.target.value)}
+                              className={`w-full bg-sleek-bg text-sleek-text-main pl-4 pr-12 py-2.5 rounded-xl border text-xs focus:outline-none transition-all font-mono ${newWaterErrors.flow ? 'border-red-500' : 'border-sleek-border focus:border-sleek-primary'}`}
+                            />
+                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-sleek-text-muted font-mono font-semibold">L/h</span>
+                          </div>
+                          {newWaterErrors.flow && <span className="text-[10px] text-red-500 font-bold">{newWaterErrors.flow}</span>}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-sleek-text-muted">Heures / poste</label>
+                            <div className="relative">
+                              <input 
+                                type="number"
+                                placeholder="8"
+                                value={newWaterHrsPerShift}
+                                onChange={(e) => setNewWaterHrsPerShift(e.target.value)}
+                                className={`w-full bg-sleek-bg text-sleek-text-main pl-4 pr-10 py-2.5 rounded-xl border text-xs focus:outline-none transition-all font-mono ${newWaterErrors.hrsPerShift ? 'border-red-500' : 'border-sleek-border focus:border-sleek-primary'}`}
+                              />
+                              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-bold text-sleek-text-muted">h/p</span>
+                            </div>
+                            {newWaterErrors.hrsPerShift && <span className="text-[10px] text-red-500 font-bold">{newWaterErrors.hrsPerShift}</span>}
+                          </div>
+
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-sleek-text-muted">Postes / jour</label>
+                            <div className="relative">
+                              <input 
+                                type="number"
+                                placeholder="1"
+                                value={newWaterShiftsPerDay}
+                                onChange={(e) => setNewWaterShiftsPerDay(e.target.value)}
+                                className={`w-full bg-sleek-bg text-sleek-text-main pl-4 pr-10 py-2.5 rounded-xl border text-xs focus:outline-none transition-all font-mono ${newWaterErrors.shiftsPerDay ? 'border-red-500' : 'border-sleek-border focus:border-sleek-primary'}`}
+                              />
+                              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-bold text-sleek-text-muted">p/j</span>
+                            </div>
+                            {newWaterErrors.shiftsPerDay && <span className="text-[10px] text-red-500 font-bold">{newWaterErrors.shiftsPerDay}</span>}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-sleek-text-muted">Jours de fonctionnement / an</label>
+                          <div className="relative">
+                            <input 
+                              type="number"
+                              placeholder="250"
+                              value={newWaterDaysPerYear}
+                              onChange={(e) => setNewWaterDaysPerYear(e.target.value)}
+                              className={`w-full bg-sleek-bg text-sleek-text-main pl-4 pr-12 py-2.5 rounded-xl border text-xs focus:outline-none transition-all font-mono ${newWaterErrors.daysPerYear ? 'border-red-500' : 'border-sleek-border focus:border-sleek-primary'}`}
+                            />
+                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-sleek-text-muted">j/an</span>
+                          </div>
+                          {newWaterErrors.daysPerYear && <span className="text-[10px] text-red-500 font-bold">{newWaterErrors.daysPerYear}</span>}
+                        </div>
+
+                        {/* Calculated total box */}
+                        <div className="bg-indigo-500/10 border border-indigo-500/20 px-4 py-2.5 rounded-xl flex items-center justify-between">
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Total Service Calculé :</span>
+                          <span className="text-xs font-mono font-black text-sleek-primary">{newWaterHours} h/an</span>
+                        </div>
+                      </div>
+
+                      <button 
+                        onClick={addWaterItem}
+                        className="w-full py-4 bg-sleek-primary text-white rounded-xl shadow-lg shadow-sleek-primary/20 hover:scale-[1.02] active:scale-[0.98] transition-all font-bold text-xs tracking-wider uppercase mt-4 flex items-center justify-center gap-2"
+                      >
+                        <PlusCircle size={16}/> Enregistrer le Poste d'eau
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Right Column: List of items in Table */}
+                  <div className="lg:col-span-8 bg-sleek-card rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col max-h-[calc(100vh-220px)]">
+                    <div className="px-6 py-4 border-b border-sleek-border bg-sleek-bg flex justify-between items-center shrink-0">
+                      <h3 className="text-xs font-bold text-sleek-text-muted uppercase tracking-widest flex items-center gap-2"><Activity size={14}/> Bilan de Consommation d'eau</h3>
+                      <div className="flex items-center gap-3">
+                        <span className="bg-sleek-primary/10 text-sleek-primary px-3 py-1 rounded-full text-[10px] font-bold">{(waterConfig.items || []).length} Postes</span>
+                      </div>
+                    </div>
+
+                    <div className="overflow-y-auto flex-1 custom-scrollbar">
+                      <table className="w-full text-left text-[12px] border-collapse min-w-[900px]">
+                        <thead className="sticky top-0 bg-sleek-card border-b border-sleek-border z-10 shadow-sm">
+                          <tr className="text-[10px] font-bold text-sleek-text-muted uppercase tracking-wider">
+                            <th className="p-4 w-1/4">Désignation</th>
+                            <th className="p-4 text-center">Débit (L/h)</th>
+                            <th className="p-4 text-center">Volume Unitaire / h</th>
+                            <th className="p-4 text-center w-[400px]">Dimensionnement (h/poste × postes/j × j/an)</th>
+                            <th className="p-4 text-center">Heures par Exercice</th>
+                            <th className="p-4 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-sleek-border/20">
+                          {(waterConfig.items || []).map((item) => (
+                            <React.Fragment key={item.id}>
+                              <tr className="hover:bg-sleek-bg/50 transition-colors">
+                                <td className="p-4">
+                                  <div className="font-semibold text-sleek-text-main">{item.designation}</div>
+                                  <div className="text-[9px] text-sleek-text-muted font-bold uppercase tracking-tighter mt-0.5">
+                                    {(item.hoursPerShift ?? 8)}h/poste • {(item.shiftsPerDay ?? 1)}poste/j • {(item.daysPerYear ?? 250)}j/an
+                                  </div>
+                                </td>
+                                <td className="p-4 text-center">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <input 
+                                      type="number"
+                                      value={item.flowRate}
+                                      onChange={(e) => updateWaterItemField(item.id, 'flowRate', Number(e.target.value))}
+                                      className="w-20 bg-sleek-bg/60 text-center rounded border border-sleek-border font-mono p-1 text-xs focus:outline-none focus:border-sleek-primary text-black font-semibold"
+                                    />
+                                    <span className="text-[9px] text-sleek-text-muted font-semibold">L/h</span>
+                                  </div>
+                                </td>
+                                <td className="p-4 text-center font-mono text-xs text-sleek-text-muted font-semibold">
+                                  {formatCurrency(item.flowRate / 1000)} m³/h
+                                </td>
+                                <td className="p-4 text-center">
+                                  <div className="flex items-center gap-1.5 justify-center">
+                                    <div className="flex flex-col items-center">
+                                      <input 
+                                        type="number"
+                                        value={item.hoursPerShift ?? 8}
+                                        onChange={(e) => updateWaterItemField(item.id, 'hoursPerShift', Number(e.target.value))}
+                                        disabled={item.hasCustomHours}
+                                        className="w-12 bg-sleek-bg text-center rounded border border-sleek-border font-mono p-1 text-xs focus:outline-none focus:border-sleek-primary disabled:opacity-50 text-black font-semibold"
+                                      />
+                                    </div>
+                                    <span className="text-sleek-text-muted font-bold text-[10px]">×</span>
+                                    <div className="flex flex-col items-center">
+                                      <input 
+                                        type="number"
+                                        value={item.shiftsPerDay ?? 1}
+                                        onChange={(e) => updateWaterItemField(item.id, 'shiftsPerDay', Number(e.target.value))}
+                                        disabled={item.hasCustomHours}
+                                        className="w-12 bg-sleek-bg text-center rounded border border-sleek-border font-mono p-1 text-xs focus:outline-none focus:border-sleek-primary disabled:opacity-50 text-black font-semibold"
+                                      />
+                                    </div>
+                                    <span className="text-sleek-text-muted font-bold text-[10px]">×</span>
+                                    <div className="flex flex-col items-center">
+                                      <input 
+                                        type="number"
+                                        value={item.daysPerYear ?? 250}
+                                        onChange={(e) => updateWaterItemField(item.id, 'daysPerYear', Number(e.target.value))}
+                                        disabled={item.hasCustomHours}
+                                        className="w-14 bg-sleek-bg text-center rounded border border-sleek-border font-mono p-1 text-xs focus:outline-none focus:border-sleek-primary disabled:opacity-50 text-black font-semibold"
+                                      />
+                                    </div>
+                                    <span className="text-sleek-text-muted font-bold text-[10px]">=</span>
+                                    <div className="flex flex-col items-center">
+                                      <span className="bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20 text-[10px] font-mono font-bold text-sleek-primary min-w-[50px] text-center mt-0.5">
+                                        {item.hoursPerYear} h
+                                      </span>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="p-4 text-center">
+                                  <button 
+                                    onClick={() => toggleWaterItemCustomHours(item.id)}
+                                    className={`px-3 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider transition-colors border ${item.hasCustomHours ? 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20' : 'bg-sleek-bg text-sleek-text-muted border-sleek-border'}`}
+                                  >
+                                    {item.hasCustomHours ? 'Personnalisé' : 'Fixe'}
+                                  </button>
+                                </td>
+                                <td className="p-4 text-center">
+                                  <button 
+                                    onClick={() => removeWaterItem(item.id)}
+                                    className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                  >
+                                    <Trash size={14}/>
+                                  </button>
+                                </td>
+                              </tr>
+                              
+                              {item.hasCustomHours && (
+                                <tr className="bg-indigo-500/[0.02]/50 border-b border-sleek-border/30">
+                                  <td colSpan={6} className="p-4 pl-8">
+                                    <div className="flex flex-col gap-2">
+                                      <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest block">Heures de fonctionnement par exercice (h/an)</span>
+                                      <div className="grid grid-cols-5 md:grid-cols-10 gap-2">
+                                        {Array.from({ length: 10 }).map((_, yIdx) => {
+                                          const hrVal = item.customHours?.[yIdx] ?? item.hoursPerYear;
+                                          return (
+                                            <div key={yIdx} className="flex flex-col gap-1 items-center bg-sleek-bg/20 p-1.5 rounded-lg border border-sleek-border">
+                                              <span className="text-[9px] text-sleek-text-muted">A {yIdx + 1}</span>
+                                              <input 
+                                                type="number"
+                                                value={hrVal}
+                                                onChange={(e) => updateWaterItemCustomHourCell(item.id, yIdx, e.target.value)}
+                                                className="w-full text-center bg-sleek-card border border-sleek-border rounded p-0.5 font-mono text-[10px] text-black focus:outline-none focus:border-sleek-primary font-semibold"
+                                              />
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          ))}
+                          {(waterConfig.items || []).length === 0 && (
+                            <tr>
+                              <td colSpan={6} className="p-12 text-center text-sleek-text-muted italic text-sm">
+                                Aucun poste de consommation d'eau défini. Utilisez le formulaire à gauche pour en ajouter.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Summary Footer with Totals */}
+                    {(waterConfig.items || []).length > 0 && (
+                      <div className="bg-sleek-card text-sleek-text-main p-6 grid grid-cols-2 gap-6 border-t border-sleek-border shadow-inner shrink-0">
+                        <div className="flex flex-col">
+                          <span className="text-[9px] text-sleek-text-muted uppercase font-bold tracking-widest mb-1">Volume Global Estimé Année 1</span>
+                          <span className="text-xl font-mono font-bold text-sky-400">
+                            {formatCurrency(waterResults.annualVolumes[0])} <span className="text-xs font-sans opacity-60">m³/an</span>
+                          </span>
+                        </div>
+                        <div className="flex flex-col text-right">
+                          <span className="text-[9px] text-emerald-400 uppercase font-black tracking-widest mb-1 font-sans">Coût Total Estimé Année 1</span>
+                          <span className="text-xl font-mono font-bold text-sleek-accent-green">
+                            {formatCurrency(waterResults.annualCosts.common[0])} <span className="text-xs font-sans opacity-60">DA/an</span>
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 3. Water cost projections over 10 years */}
+                <div className="bg-sleek-card rounded-2xl border border-sleek-border shadow-md overflow-hidden flex flex-col min-h-[300px] shrink-0 mb-6 font-sans">
+                  <div className="px-6 py-4 border-b border-sleek-border bg-sleek-bg flex items-center justify-between">
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-sleek-text-muted font-sans font-bold">Projection Consommation & Coût de l'eau sur 10 ans</h3>
+                    <div className="bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 border border-emerald-500/20">
+                      <Check size={12}/> Injection TCR Activée
+                    </div>
+                  </div>
+                  <div className="p-6">
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                      {Array.from({ length: 10 }).map((_, yIdx) => {
+                        const yrCost = waterResults.annualCosts.common[yIdx] || 0;
+                        const yrVol = waterResults.annualVolumes[yIdx] || 0;
+                        return (
+                          <div key={yIdx} className="bg-sleek-bg/50 p-4 rounded-xl border border-sleek-border flex flex-col gap-2 items-center text-center">
+                            <span className="text-[10px] font-bold text-sleek-text-muted uppercase tracking-wider">Année {yIdx + 1}</span>
+                            <div className="flex flex-col">
+                              <span className="text-[11px] font-mono font-bold text-sleek-primary">{yrVol.toLocaleString(undefined, {maximumFractionDigits: 1})} m³</span>
+                              <span className="text-[12px] font-mono font-black text-sleek-accent-green mt-0.5">{formatCurrency(yrCost)} DA</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <InfoCallout 
+                      title="Consommation d'eau"
+                      description={
+                        <>
+                          L'eau est requise principalement pour les opérations d'extraction. 
+                          Le coût annuel total calculé est automatiquement injecté dans le poste <b>Matières & Fournitures</b> du TCR (Tableau des Comptes de Résultats), garantissant que le coût opérationnel réel prend en compte toutes les consommations de fluide.
+                        </>
+                      }
+                      className="mt-6"
+                    />
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -3530,7 +4633,7 @@ export default function App() {
                         exit={{ height: 0, opacity: 0 }}
                         className="overflow-hidden"
                       >
-                        <div className="p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+                        <div className="p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-8">
                           <div className="space-y-4">
                             <h4 className="text-[10px] font-bold text-sleek-text-muted uppercase tracking-widest border-b border-sleek-border pb-2">Fiscalité</h4>
                             <InputGroupVertical 
@@ -3599,15 +4702,97 @@ export default function App() {
                               />
                             </div>
                           </div>
-                          <div className="space-y-4 opacity-40 grayscale pointer-events-none cursor-not-allowed">
-                            <h4 className="text-[10px] font-bold text-sleek-text-muted uppercase tracking-widest border-b border-sleek-border pb-2">Calendrier (Obsolète)</h4>
-                            <InputGroupVertical 
-                              label="Jours Ouvrable / An" 
-                              value={(opConfig.workDaysPerYear ?? 0).toString()} 
-                              onChange={() => {}} 
-                              type="number"
-                              helper="Désormais indépendant par module"
-                            />
+                          
+                          <div className="space-y-4">
+                            <h4 className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest border-b border-sleek-border pb-2">Tarification Granite</h4>
+                            <div className="space-y-4">
+                              <InputGroupVertical 
+                                label="Prix Granite (DA/m³)" 
+                                value={priceGraniteInput} 
+                                onChange={(v) => {
+                                  setPriceGraniteInput(v);
+                                  const parsed = parseFloat(v.replace(',', '.'));
+                                  if (!isNaN(parsed) && parsed >= 0) {
+                                    setPriceGranite(parsed);
+                                  } else if (v === '') {
+                                    setPriceGranite(0);
+                                  }
+                                }} 
+                                type="text"
+                                helper="CA nul si vide ou non renseigné"
+                              />
+                              <InputGroupVertical 
+                                label="Densité Granite (t/m³)" 
+                                value={densityGraniteInput} 
+                                onChange={(v) => {
+                                  setDensityGraniteInput(v);
+                                  const parsed = parseFloat(v.replace(',', '.'));
+                                  if (!isNaN(parsed) && parsed > 0) {
+                                    setDensityGranite(parsed);
+                                  }
+                                }} 
+                                type="text"
+                                helper="Doit être strictement > 0"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-4">
+                            <h4 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest border-b border-sleek-border pb-2">Tarification Tuf</h4>
+                            <div className="space-y-4">
+                              <InputGroupVertical 
+                                label="Prix Tuf (DA/m³)" 
+                                value={priceTufInput} 
+                                onChange={(v) => {
+                                  setPriceTufInput(v);
+                                  const parsed = parseFloat(v.replace(',', '.'));
+                                  if (!isNaN(parsed) && parsed >= 0) {
+                                    setPriceTuf(parsed);
+                                  } else if (v === '') {
+                                    setPriceTuf(0);
+                                  }
+                                }} 
+                                type="text"
+                                helper="CA nul si vide ou non renseigné"
+                              />
+                              <InputGroupVertical 
+                                label="Densité Tuf (t/m³)" 
+                                value={densityTufInput} 
+                                onChange={(v) => {
+                                  setDensityTufInput(v);
+                                  const parsed = parseFloat(v.replace(',', '.'));
+                                  if (!isNaN(parsed) && parsed > 0) {
+                                    setDensityTuf(parsed);
+                                  }
+                                }} 
+                                type="text"
+                                helper="Doit être strictement > 0"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-4">
+                            <h4 className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest border-b border-sleek-border pb-2">Décimales & Infos</h4>
+                            <div className="space-y-4">
+                              <InputGroupVertical 
+                                label="Décimales Arrondis" 
+                                value={decimalPlacesInput} 
+                                onChange={(v) => {
+                                  setDecimalPlacesInput(v);
+                                  const parsed = parseInt(v, 10);
+                                  if (!isNaN(parsed) && parsed >= 0 && parsed <= 5) {
+                                    setDecimalPlaces(parsed);
+                                  }
+                                }} 
+                                type="number"
+                                helper="Nombre de décimales (0 à 5)"
+                              />
+                              <div className="bg-sleek-bg/50 p-2.5 rounded-xl border border-sleek-border text-[9px] text-sleek-text-muted leading-tight">
+                                <b>Formule de calcul :</b><br/>
+                                • Vol = Extraction / Densité<br/>
+                                • CA = Vol × Prix
+                              </div>
+                            </div>
                           </div>
                         </div>
                         <div className="px-8 py-4 bg-indigo-500/10 border-t border-sleek-border flex items-center justify-between gap-3">
@@ -3652,6 +4837,11 @@ export default function App() {
                     calculatedYear={calculatedYears[idx]} 
                     amortTotals={amortResults.annualTotals} 
                     onUpdate={handleUpdateYear} 
+                    priceGranite={priceGranite}
+                    densityGranite={densityGranite}
+                    priceTuf={priceTuf}
+                    densityTuf={densityTuf}
+                    decimalPlaces={decimalPlaces}
                   />
                 ))}
               </motion.div>
@@ -3667,18 +4857,18 @@ export default function App() {
                 className="flex-1 bg-sleek-card rounded-2xl border border-sleek-border shadow-2xl overflow-hidden flex flex-col"
               >
                 <div className="flex-1 overflow-auto custom-scrollbar relative">
-                  <table className="w-full border-collapse min-w-[1200px]">
+                  <table className="table-fixed border-collapse min-w-[2100px] w-[2100px]">
                     <thead className="sticky top-0 z-[60] shadow-sm">
                       <tr>
-                        <th className="bg-sleek-bg p-5 text-left w-72 border-b border-sleek-border font-bold text-[10px] uppercase tracking-widest text-sleek-text-muted sticky left-0 z-[70] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] font-serif italic backdrop-blur-md">Compte de Résultat (TCR - DA)</th>
+                        <th className="bg-sleek-bg p-5 text-left w-[320px] min-w-[320px] max-w-[320px] border-b border-sleek-border font-bold text-[10px] uppercase tracking-widest text-sleek-text-muted sticky left-0 z-[70] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] font-serif italic backdrop-blur-md">Compte de Résultat (TCR - DA)</th>
                         {calculatedYears.map(y => (
-                          <th key={y.year} className="bg-sleek-bg p-5 text-right border-b border-sleek-border border-r border-white/10 font-bold text-[10px] text-sleek-text-muted whitespace-nowrap backdrop-blur-md">Année {y.year}</th>
+                          <th key={y.year} className="bg-sleek-bg p-5 text-right border-b border-sleek-border border-r border-white/10 font-bold text-[10px] text-sleek-text-muted whitespace-nowrap backdrop-blur-md min-w-[160px] w-[160px] max-w-[160px]">Année {y.year}</th>
                         ))}
-                        <th className="bg-sleek-card p-5 text-right border-b border-sleek-border font-bold text-[10px] text-sleek-text-main shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)] uppercase tracking-widest sticky right-0 z-[70] backdrop-blur-md">TOTAL (DA)</th>
+                        <th className="bg-sleek-card p-5 text-right border-b border-sleek-border font-bold text-[10px] text-sleek-text-main shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)] uppercase tracking-widest sticky right-0 z-[70] backdrop-blur-md min-w-[180px] w-[180px] max-w-[180px]">TOTAL (DA)</th>
                       </tr>
                     </thead>
                     <tbody className="text-[12px] font-mono leading-none divide-y divide-sleek-border/20">
-                      <SleekRow label="EXTRACTION GRANITE (T)" values={calculatedYears.map(y => y.extractionGranite)} total={totalRow.extractionGranite} format={formatCurrency} />
+                      <SleekRow label="EXTRACTION GRANITE (m³)" values={calculatedYears.map(y => y.extractionGranite)} total={totalRow.extractionGranite} format={formatCurrency} />
                       <SleekRow label="EXTRACTION TUF (T)" values={calculatedYears.map(y => y.extractionTuf)} total={totalRow.extractionTuf} format={formatCurrency} />
                       <SleekRow label="CHIFFRE AFFAIRES GRANITE" values={calculatedYears.map(y => y.caGranite)} total={totalRow.caGranite} format={formatCurrency} />
                       <SleekRow label="CHIFFRE AFFAIRES TUF" values={calculatedYears.map(y => y.caTuf)} total={totalRow.caTuf} format={formatCurrency} />
@@ -3696,7 +4886,7 @@ export default function App() {
                       <SleekRow label="Impôts sur les bénéfices (IBM)" values={calculatedYears.map(y => y.ibm)} total={totalRow.ibm} format={formatCurrency} formula={`Formule : Résultat d'exploitation × Taux IBM (${ibmRate * 100}%)`} />
                       <SleekRow label="RÉSULTAT NET DE L'EXERCICE" values={calculatedYears.map(y => y.resultatNet)} total={totalRow.resultatNet} format={formatCurrency} type="total" formula="Formule : Résultat d'exploitation - IBM" />
                       <SleekRow label="CAPACITÉ D'AUTOFINANCEMENT (FNT)" values={calculatedYears.map(y => y.fnt)} total={totalRow.fnt} format={formatCurrency} formula="Formule : Résultat Net + Dotations aux Amortissements" />
-                      <SleekRow label="PRIX REVIENT GRANITE (DA/T)" values={calculatedYears.map(y => y.prixRevientGranite)} total={totalRow.prixRevientGranite} format={formatCompact} formula="Alloc. directes + Quote-part indirects" />
+                      <SleekRow label="PRIX REVIENT GRANITE (DA/m³)" values={calculatedYears.map(y => y.prixRevientGranite)} total={totalRow.prixRevientGranite} format={formatCompact} formula="Alloc. directes + Quote-part indirects" />
                       <SleekRow label="PRIX REVIENT TUF (DA/T)" values={calculatedYears.map(y => y.prixRevientTuf)} total={totalRow.prixRevientTuf} format={formatCompact} formula="Alloc. directes + Quote-part indirects" />
                     </tbody>
                   </table>
@@ -3908,8 +5098,8 @@ export default function App() {
                       />
                       <HelpCard 
                         icon={<Calculator size={20} className="text-orange-400" />}
-                        title="Coût de Revient (DA/T)" 
-                        description="Formule : (Total Charges Directes Produit + Quote-part Charges Communes) / Tonnage Extrait. Ce coût est indispensable pour fixer un prix de vente compétitif tout en assurant la rentabilité du site."
+                        title="Coût de Revient (DA/m³ & DA/T)" 
+                        description="Formule : (Charges Directes + Quote-part Communes) / Quantité Extraite. Exprimé en DA/m³ pour le Granite (basé sur le volume) et en DA/T pour le Tuf (basé sur le tonnage). Ce coût permet de fixer des prix de vente précis."
                         color="bg-orange-400/5"
                       />
                       <HelpCard 
@@ -3952,80 +5142,325 @@ export default function App() {
                 transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
                 className="flex-1 overflow-y-auto pr-2 custom-scrollbar pb-10"
               >
-                <div className="max-w-4xl mx-auto">
+                <div className="max-w-4xl mx-auto space-y-8">
+                  
+                  {/* Cloud Connection Panel */}
+                  <div className="bg-sleek-card rounded-[2.5rem] p-8 border border-sleek-border shadow-xl relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl -z-10" />
+                    <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl -z-10" />
+                    
+                    {!fbUser ? (
+                      <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2.5">
+                            <span className="bg-indigo-500/15 text-indigo-500 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider font-mono flex items-center gap-1">
+                              <Cloud className="animate-bounce" size={10} /> Nouveau : Synchronisation Cloud
+                            </span>
+                          </div>
+                          <h3 className="text-xl font-bold text-sleek-text-main">
+                            Conserver vos scénarios même après déploiement sur Vercel
+                          </h3>
+                          <p className="text-xs text-sleek-text-muted max-w-xl leading-relaxed">
+                            Connectez-vous pour sauvegarder vos calculs dans une base de données cloud sécurisée. Vous pourrez recharger vos simulations de n'importe où, sur n'importe quel appareil, même après la conversion en site web de production.
+                          </p>
+                        </div>
+                        <button
+                          onClick={handleGoogleSignIn}
+                          className="flex items-center gap-2.5 px-6 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black uppercase tracking-widest rounded-2xl shadow-lg shadow-indigo-600/20 active:scale-95 transition-all w-full md:w-auto justify-center cursor-pointer"
+                        >
+                          <LogIn size={15} />
+                          Se connecter avec Google
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                        <div className="flex items-center gap-4">
+                          {fbUser.photoURL ? (
+                            <img src={fbUser.photoURL} alt="Avatar" className="w-14 h-14 rounded-full border-2 border-indigo-500/20 shadow-inner" />
+                          ) : (
+                            <div className="w-14 h-14 bg-indigo-500/10 text-indigo-600 rounded-full flex items-center justify-center font-black text-xl">
+                              {fbUser.displayName?.charAt(0) || "U"}
+                            </div>
+                          )}
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-bold text-sleek-text-main">{fbUser.displayName}</span>
+                              <span className="bg-emerald-500/10 text-emerald-600 text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-emerald-500/20 flex items-center gap-1 shadow-sm font-mono">
+                                <Cloud size={8} /> Connecté Cloud
+                              </span>
+                            </div>
+                            <p className="text-xs text-sleek-text-muted font-mono">{fbUser.email}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                          <button
+                            onClick={handleSyncLocalToCloud}
+                            disabled={isCloudLoading}
+                            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border border-indigo-500/20"
+                            title="Téléverser l'historique de cet ordinateur vers votre espace sésurisé en ligne"
+                          >
+                            <RefreshCw size={13} className={isCloudLoading ? "animate-spin" : ""} />
+                            Sync locales ➔ Cloud
+                          </button>
+                          
+                          <button
+                            onClick={handleSignOut}
+                            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-red-500/5 hover:bg-red-500/10 text-red-500 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border border-red-500/20"
+                          >
+                            <LogOut size={13} />
+                            Se déconnecter
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Master Backup Card */}
                   <div className="bg-sleek-card rounded-[2.5rem] p-10 border border-sleek-border shadow-xl">
                     <div className="flex items-center justify-between mb-8">
                        <h2 className="text-2xl font-black text-sleek-text-main flex items-center gap-3">
                          <div className="w-10 h-10 bg-indigo-500/10 rounded-xl flex items-center justify-center text-indigo-600">
                            <History size={20} />
                          </div>
-                         Historique des Sauvegardes
+                         Création d'une version
                        </h2>
-                       <button 
-                         onClick={() => {
-                           setHistory([]);
-                           showToast("Historique vidé");
-                         }}
-                         className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-red-500 hover:bg-red-500/10 rounded-xl transition-all border border-red-500/20"
-                       >
-                         Vider l'Historique
-                       </button>
                     </div>
 
-                    {(!Array.isArray(history) || history.length === 0) ? (
-                      <div className="flex flex-col items-center justify-center py-20 bg-sleek-bg/50 rounded-3xl border border-dashed border-sleek-border/50">
-                        <Clock size={48} className="text-sleek-text-muted/20 mb-4" />
-                        <p className="text-sm font-bold text-sleek-text-muted opacity-40 uppercase tracking-widest">Aucune sauvegarde trouvée</p>
-                        <p className="text-[10px] text-sleek-text-muted opacity-30 mt-1 uppercase tracking-widest">Cliquez sur "Enregistrer" pour créer une version</p>
-                      </div>
-                    ) : (
+                    {/* Enregistrer la configuration actuelle - TCR GRANITE */}
+                    <div className="bg-gradient-to-br from-indigo-500/5 to-purple-500/5 rounded-3xl p-6 border border-indigo-500/10 mb-8 shadow-sm">
+                       <h3 className="text-xs font-bold text-indigo-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                         <PlusCircle size={14} className="text-indigo-500 animate-pulse" />
+                         Nommer la simulation actuelle (حفظ مسمى)
+                       </h3>
+                       <div className="flex flex-col md:flex-row gap-4 items-end">
+                         <div className="flex-1 space-y-1.5 w-full">
+                           <label className="text-[10px] font-extrabold uppercase tracking-wider text-sleek-text-muted opacity-80 block pl-1">Nom de la version / اسم النسخة</label>
+                           <input 
+                             type="text" 
+                             value={customSaveName} 
+                             onChange={(e) => setCustomSaveName(e.target.value)}
+                             placeholder="Ex: TCR GRANITE" 
+                             className="w-full bg-sleek-bg border border-sleek-border/70 rounded-xl px-4 py-2.5 text-xs font-mono focus:ring-2 focus:ring-indigo-500/40 outline-none text-sleek-text-main placeholder:text-sleek-text-muted/30"
+                           />
+                         </div>
+                         <div className="flex gap-1.5 w-full md:w-auto">
+                           <button 
+                             type="button"
+                             onClick={() => setCustomSaveName("TCR GRANITE")}
+                             className="flex-1 md:flex-initial px-3.5 py-2.5 bg-sleek-bg border border-sleek-border rounded-xl text-[9px] font-extrabold uppercase tracking-widest text-sleek-text-muted hover:border-emerald-500/40 hover:text-emerald-500 transition-all font-mono animate-none active:scale-95"
+                           >
+                             TCR GRANITE
+                           </button>
+                           <button 
+                             type="button"
+                             onClick={() => setCustomSaveName("TCR TUF")}
+                             className="flex-1 md:flex-initial px-3.5 py-2.5 bg-sleek-bg border border-sleek-border rounded-xl text-[9px] font-extrabold uppercase tracking-widest text-sleek-text-muted hover:border-indigo-500/40 hover:text-indigo-500 transition-all font-mono animate-none active:scale-95"
+                           >
+                             TCR TUF
+                           </button>
+                         </div>
+                         
+                         <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                            <button 
+                              onClick={() => {
+                                if (!customSaveName.trim()) {
+                                  showToast("Veuillez entrer un nom", "error");
+                                  return;
+                                }
+                                handleSave(customSaveName.trim());
+                              }}
+                              className="flex items-center gap-2 px-5 py-2.5 bg-sleek-bg hover:bg-sleek-bg/80 border border-sleek-border text-sleek-text-main text-[10px] font-black uppercase tracking-widest rounded-xl hover:scale-[1.02] active:scale-95 transition-all justify-center cursor-pointer"
+                            >
+                              <Save size={14} className="text-sleek-text-muted" />
+                              Local (🖥️)
+                            </button>
+
+                            <button 
+                              onClick={() => {
+                                if (!fbUser) {
+                                  showToast("Veuillez vous connecter avec votre compte Google.", "error");
+                                  handleGoogleSignIn();
+                                  return;
+                                }
+                                if (!customSaveName.trim()) {
+                                  showToast("Veuillez entrer un nom", "error");
+                                  return;
+                                }
+                                handleSaveToCloud(customSaveName.trim());
+                              }}
+                              className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-indigo-600/25 hover:scale-[1.02] active:scale-95 transition-all justify-center cursor-pointer"
+                            >
+                              <Cloud size={14} />
+                              Cloud (☁️)
+                            </button>
+                         </div>
+                       </div>
+                    </div>
+
+                    {/* TWO COLYMNS / LISTS FOR SECURE DATABASE PREVIEW */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-10">
+                      
+                      {/* Left: Cloud Scenarios List */}
                       <div className="space-y-4">
-                        {Array.isArray(history) && history.map((save, idx) => (
-                          <div key={idx} className="group relative bg-sleek-bg/40 border border-sleek-border hover:border-sleek-primary/30 hover:bg-sleek-card rounded-2xl p-6 transition-all shadow-sm hover:shadow-xl">
-                            <div className="flex items-center justify-between">
-                              <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs font-black text-sleek-text-main group-hover:text-sleek-primary transition-colors">
-                                    {new Date(save.lastSaved).toLocaleString('fr-DZ', { dateStyle: 'long', timeStyle: 'short' })}
-                                  </span>
-                                  {idx === 0 && <span className="bg-emerald-500/10 text-emerald-600 text-[8px] font-black uppercase px-2 py-0.5 rounded-full border border-emerald-500/20">Dernière</span>}
-                                </div>
-                                <span className="text-[10px] text-sleek-text-muted font-bold opacity-60 uppercase tracking-widest">
-                                  {save.years?.length || 0} Ans • {save.equipments?.length || 0} Equipements • {save.roles?.length || 0} Employés
-                                </span>
-                              </div>
-                              
-                              <div className="flex items-center gap-2">
-                                <button 
-                                  onClick={() => restoreFromHistory(save)}
-                                  className="flex items-center gap-2 px-5 py-2.5 bg-sleek-primary text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-sleek-primary/20 hover:scale-105 active:scale-95 transition-all"
-                                >
-                                  <Undo2 size={14} />
-                                  Restaurer
-                                </button>
-                                <button 
-                                  onClick={() => {
-                                    setHistory(prev => (prev || []).filter((_, i) => i !== idx));
-                                    showToast("Supprimé");
-                                  }}
-                                  className="p-2.5 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all border border-red-500/20"
-                                >
-                                  <Trash2 size={16} />
-                                </button>
-                              </div>
-                            </div>
-                            
-                            {save.userNotes && (
-                              <div className="mt-4 pt-4 border-t border-sleek-border/50">
-                                <p className="text-[10px] text-sleek-text-muted font-medium italic line-clamp-2">
-                                  Note: {save.userNotes}
-                                </p>
-                              </div>
-                            )}
+                        <div className="flex items-center justify-between border-b border-sleek-border/70 pb-3">
+                          <h3 className="text-sm font-black text-sleek-text-main flex items-center gap-2">
+                            <span className="p-1.5 bg-indigo-500/10 rounded-lg text-indigo-600">
+                              <Cloud size={14} />
+                            </span>
+                            Scénarios Cloud (☁️ En Ligne)
+                          </h3>
+                          {fbUser && (
+                            <span className="text-[10px] font-extrabold text-sleek-text-muted font-mono bg-sleek-bg px-2.5 py-1 rounded-full border border-sleek-border shadow-sm">
+                              {cloudStudies.length} versions
+                            </span>
+                          )}
+                        </div>
+
+                        {!fbUser ? (
+                          <div className="flex flex-col items-center justify-center p-8 bg-sleek-bg/20 rounded-2xl border border-dashed border-sleek-border/80 text-center space-y-3">
+                            <Cloud size={24} className="text-sleek-text-muted opacity-30" />
+                            <p className="text-[11px] font-bold text-sleek-text-muted opacity-80 uppercase tracking-widest leading-relaxed">
+                              🔒 Section Cloud Verrouillée
+                            </p>
+                            <span className="text-[9px] text-sleek-text-muted opacity-60 leading-normal block max-w-xs">
+                              Connectez-vous avec Google ci-dessus pour accéder à votre espace de stockage sécurisé et permanent.
+                            </span>
                           </div>
-                        ))}
+                        ) : isCloudLoading ? (
+                          <div className="flex flex-col items-center justify-center py-12">
+                            <RefreshCw className="animate-spin text-indigo-600 mb-2" size={24} />
+                            <span className="text-[9px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-50">Chargement de la base cloud...</span>
+                          </div>
+                        ) : cloudStudies.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center py-10 bg-sleek-bg/20 rounded-2xl border border-dashed border-sleek-border/80 text-center">
+                            <Cloud size={24} className="text-indigo-600/20 mb-2" />
+                            <p className="text-[10px] font-bold text-sleek-text-muted opacity-60 uppercase tracking-widest">Aucune sauvegarde Cloud</p>
+                            <span className="text-[8px] text-sleek-text-muted opacity-40 mt-1 max-w-xs">Enregistrez un scénario Cloud ci-dessus ou importez vos configurations de cet ordi.</span>
+                          </div>
+                        ) : (
+                          <div className="space-y-3 max-h-[480px] overflow-y-auto pr-1">
+                            {cloudStudies.map((save) => (
+                              <div key={save.id} className="group relative bg-sleek-bg/40 border border-sleek-border hover:border-indigo-500/30 hover:bg-sleek-card rounded-2xl p-5 transition-all shadow-sm">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex flex-col gap-1.5">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="bg-indigo-500/10 text-indigo-600 text-[9px] font-black uppercase px-2.5 py-0.5 rounded-full border border-indigo-500/20 shadow-sm font-mono">
+                                        {save.saveName}
+                                      </span>
+                                      <span className="text-[9px] text-sleek-text-muted font-bold opacity-60 font-mono">
+                                        ({new Date(save.lastSaved).toLocaleString('fr-DZ', { dateStyle: 'short', timeStyle: 'short' })})
+                                      </span>
+                                    </div>
+                                    <span className="text-[8px] text-sleek-text-muted font-bold opacity-60 uppercase tracking-widest">
+                                      {save.years?.length || 0} Ans • {save.equipments?.length || 0} Equip. • {save.roles?.length || 0} RH
+                                    </span>
+                                  </div>
+                                  
+                                  <div className="flex items-center gap-1.5">
+                                    <button 
+                                      onClick={() => restoreFromHistory(save)}
+                                      className="flex items-center gap-1 px-3.5 py-2 bg-indigo-600 text-white text-[9px] font-black uppercase tracking-widest rounded-lg shadow-sm hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                                      title="Restaurer cette version en direct"
+                                    >
+                                      <Undo2 size={12} />
+                                      Charger
+                                    </button>
+                                    <button 
+                                      onClick={() => {
+                                        if (confirm("Voulez-vous supprimer ce scénario Cloud DEFINITIVEMENT ?\nهل تريد حذف هذه النسخة الاحتياطية السحابية نهائياً؟")) {
+                                          handleDeleteFromCloud(save.id);
+                                        }
+                                      }}
+                                      className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all border border-red-500/20 cursor-pointer"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    )}
+
+                      {/* Right: Local Storage Scenarios List */}
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between border-b border-sleek-border/70 pb-3">
+                          <h3 className="text-sm font-black text-sleek-text-main flex items-center gap-2">
+                            <span className="p-1.5 bg-emerald-500/10 rounded-lg text-emerald-600">
+                              <HardDrive size={14} />
+                            </span>
+                            Scénarios Locaux (🖥️ Ce Navigateur)
+                          </h3>
+                          <button 
+                            onClick={() => {
+                              if (confirm("Voulez-vous vraiment vider tout l'historique local ?\nهل تريد حقاً مسح سجل الحفظ بالكامل؟")) {
+                                setHistory([]);
+                                showToast("Historique local vidé");
+                              }
+                            }}
+                            className="text-[9px] font-bold uppercase tracking-wider text-red-500 hover:underline px-1 py-0.5"
+                          >
+                            Vider local
+                          </button>
+                        </div>
+
+                        {(!Array.isArray(history) || history.length === 0) ? (
+                          <div className="flex flex-col items-center justify-center py-10 bg-sleek-bg/20 rounded-2xl border border-dashed border-sleek-border/80 text-center">
+                            <Clock size={24} className="text-sleek-text-muted opacity-30 mb-2" />
+                            <p className="text-[10px] font-bold text-sleek-text-muted opacity-40 uppercase tracking-widest">Aucune sauvegarde locale</p>
+                            <span className="text-[8px] text-sleek-text-muted opacity-30 mt-1 max-w-xs">Réalisez un enregistrement local pour lister vos simulations ici.</span>
+                          </div>
+                        ) : (
+                          <div className="space-y-3 max-h-[480px] overflow-y-auto pr-1">
+                            {history.map((save, idx) => (
+                              <div key={idx} className="group relative bg-sleek-bg/40 border border-sleek-border hover:border-emerald-500/30 hover:bg-sleek-card rounded-2xl p-5 transition-all shadow-sm">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex flex-col gap-1.5">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="bg-emerald-500/10 text-emerald-600 text-[9px] font-black uppercase px-2.5 py-0.5 rounded-full border border-emerald-500/20 shadow-sm font-mono">
+                                        {save.saveName || "Simulation sans nom"}
+                                      </span>
+                                      <span className="text-[9px] text-sleek-text-muted font-bold opacity-60 font-mono">
+                                        ({new Date(save.lastSaved).toLocaleString('fr-DZ', { dateStyle: 'short', timeStyle: 'short' })})
+                                      </span>
+                                    </div>
+                                    <span className="text-[8px] text-sleek-text-muted font-bold opacity-60 uppercase tracking-widest">
+                                      {save.years?.length || 0} Ans • {save.equipments?.length || 0} Equip. • {save.roles?.length || 0} RH
+                                    </span>
+                                  </div>
+                                  
+                                  <div className="flex items-center gap-1.5">
+                                    <button 
+                                      onClick={() => restoreFromHistory(save)}
+                                      className="flex items-center gap-1 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-black uppercase tracking-widest rounded-lg shadow-sm hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                                      title="Restaurer cette version locale"
+                                    >
+                                      <Undo2 size={12} />
+                                      Charger
+                                    </button>
+                                    <button 
+                                      onClick={() => {
+                                        if (confirm("Voulez-vous supprimer cette sauvegarde locale ?")) {
+                                          setHistory(prev => (prev || []).filter((_, i) => i !== idx));
+                                          showToast("Supprimé");
+                                        }
+                                      }}
+                                      className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all border border-red-500/20 cursor-pointer"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                    </div>
+
                   </div>
                 </div>
               </motion.div>
@@ -4271,7 +5706,7 @@ const SleekRow = React.memo(({ label, values, total, format, type, formula }: { 
       type === 'total' && "bg-blue-500/5 font-bold text-sleek-primary border-t border-sleek-primary shadow-sm"
     )}>
       <td className={cn(
-        "p-4 text-left sticky left-0 z-40 border-r border-sleek-border font-bold text-sleek-text-muted transition-colors uppercase text-[9px] tracking-widest relative group/label cursor-help shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]", 
+        "p-4 text-left sticky left-0 z-40 border-r border-sleek-border font-bold text-sleek-text-muted transition-colors uppercase text-[9px] tracking-widest relative group/label cursor-help shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] w-[320px] min-w-[320px] max-w-[320px]", 
         type === 'added-value' ? "bg-indigo-500/10" : type === 'subtotal' ? "bg-red-500/10" : type === 'total' ? "bg-blue-500/10" : "bg-sleek-card group-hover/row:bg-sleek-bg group-even/row:bg-sleek-bg/50"
       )}>
         <div className="flex items-center gap-1.5 px-2">
@@ -4290,12 +5725,12 @@ const SleekRow = React.memo(({ label, values, total, format, type, formula }: { 
         )}
       </td>
       {values.map((v, i) => (
-        <td key={i} className="p-4 text-right whitespace-nowrap tabular-nums text-xs font-medium opacity-80 group-hover/row:opacity-100 group-hover/row:scale-105 transition-all duration-200">
+        <td key={i} className="p-4 text-right whitespace-nowrap tabular-nums text-xs font-medium opacity-80 group-hover/row:opacity-100 group-hover/row:scale-105 transition-all duration-200 min-w-[160px] w-[160px] max-w-[160px]">
           {format(v)}
         </td>
       ))}
       <td className={cn(
-        "p-4 text-right font-bold whitespace-nowrap tabular-nums text-sm z-40 sticky right-0 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.05)] transition-all duration-200", 
+        "p-4 text-right font-bold whitespace-nowrap tabular-nums text-sm z-40 sticky right-0 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.05)] transition-all duration-200 min-w-[180px] w-[180px] max-w-[180px]", 
         type === 'added-value' ? "bg-indigo-500/10" : type === 'subtotal' ? "bg-red-500/10" : type === 'total' ? "bg-blue-500/10" : "bg-sleek-bg group-hover/row:bg-sleek-bg/70 group-hover/row:scale-105"
       )}>
         {format(total)}
@@ -4340,13 +5775,23 @@ const YearEditCard = React.memo(({
   idx, 
   calculatedYear, 
   amortTotals, 
-  onUpdate 
+  onUpdate,
+  priceGranite,
+  densityGranite,
+  priceTuf,
+  densityTuf,
+  decimalPlaces
 }: { 
   year: AnnualData, 
   idx: number, 
   calculatedYear: FullYearData, 
   amortTotals: SplitCosts, 
-  onUpdate: (idx: number, field: keyof AnnualData, value: number) => void 
+  onUpdate: (idx: number, field: keyof AnnualData, value: number) => void,
+  priceGranite: number,
+  densityGranite: number,
+  priceTuf: number,
+  densityTuf: number,
+  decimalPlaces: number
 }) => {
   return (
     <div className="bg-sleek-card rounded-2xl border border-sleek-border shadow-sm p-8 hover:shadow-md transition-shadow">
@@ -4368,14 +5813,46 @@ const YearEditCard = React.memo(({
       </div>
       <div className="grid grid-cols-4 gap-6 mb-8 pt-6 border-t border-sleek-border">
         <div className="flex flex-col gap-2">
-           <span className="text-[10px] font-extrabold text-sleek-text-muted uppercase tracking-widest pl-1">Section Granite</span>
-           <InputGroup label="Extraction (T)" value={year.extractionGranite} onChange={(v) => onUpdate(idx, 'extractionGranite', v)} suffix="T" />
-           <InputGroup label="Revenus (DA)" value={year.caGranite} onChange={(v) => onUpdate(idx, 'caGranite', v)} suffix="DA" />
+           <span className="text-[10px] font-extrabold text-indigo-500 uppercase tracking-widest pl-1">Section Granite</span>
+           <InputGroup label="Extraction (m³)" value={year.extractionGranite} onChange={(v) => onUpdate(idx, 'extractionGranite', v)} suffix="m³" />
+           <div className="bg-sleek-bg/50 p-3 rounded-xl border border-sleek-border flex flex-col gap-2 mt-1">
+             <div className="flex justify-between items-center text-[10px] font-bold text-sleek-text-muted">
+               <span>Poids :</span>
+               <span className="font-mono text-sleek-text-main">
+                 {((year.extractionGranite || 0) * densityGranite).toLocaleString('fr-DZ', { maximumFractionDigits: decimalPlaces, minimumFractionDigits: decimalPlaces })} T
+               </span>
+             </div>
+             <div className="flex justify-between items-center text-[10px] font-bold text-sleek-text-muted">
+               <span>Revenus :</span>
+               <span className={cn("font-mono font-extrabold", priceGranite <= 0 ? "text-amber-500 text-[9px]" : "text-sleek-primary")}>
+                 {priceGranite <= 0 
+                   ? "Prix requis" 
+                   : `${formatCurrency(calculatedYear.caGranite)} DA`}
+               </span>
+             </div>
+           </div>
         </div>
         <div className="flex flex-col gap-2">
-           <span className="text-[10px] font-extrabold text-sleek-text-muted uppercase tracking-widest pl-1">Section Tuf</span>
+           <span className="text-[10px] font-extrabold text-amber-500 uppercase tracking-widest pl-1">Section Tuf</span>
            <InputGroup label="Extraction (T)" value={year.extractionTuf} onChange={(v) => onUpdate(idx, 'extractionTuf', v)} suffix="T" />
-           <InputGroup label="Revenus (DA)" value={year.caTuf} onChange={(v) => onUpdate(idx, 'caTuf', v)} suffix="DA" />
+           <div className="bg-sleek-bg/50 p-3 rounded-xl border border-sleek-border flex flex-col gap-2 mt-1">
+             <div className="flex justify-between items-center text-[10px] font-bold text-sleek-text-muted">
+               <span>Volume :</span>
+               <span className="font-mono text-sleek-text-main">
+                 {densityTuf > 0 
+                   ? ((year.extractionTuf || 0) / densityTuf).toLocaleString('fr-DZ', { maximumFractionDigits: decimalPlaces, minimumFractionDigits: decimalPlaces })
+                   : "0,00"} m³
+               </span>
+             </div>
+             <div className="flex justify-between items-center text-[10px] font-bold text-sleek-text-muted">
+               <span>Revenus :</span>
+               <span className={cn("font-mono font-extrabold", priceTuf <= 0 ? "text-amber-500 text-[9px]" : "text-sleek-primary")}>
+                 {priceTuf <= 0 
+                   ? "Prix requis" 
+                   : `${formatCurrency(calculatedYear.caTuf)} DA`}
+               </span>
+             </div>
+           </div>
         </div>
         <div className="flex flex-col gap-2">
            <span className="text-[10px] font-extrabold text-sleek-text-muted uppercase tracking-widest pl-1">Charges Directes</span>
