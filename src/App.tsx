@@ -89,19 +89,72 @@ import { AnnualData, Equipment, EmployeeRole, HRConfig, OperationalMachine, Oper
 import { calculateYear, calculateTotals, getAmortizationSchedule, getHRCosts, getOperationalCosts, getElectricityCosts, getAccessoryCosts, SplitCosts, getWaterCosts } from './lib/calculations';
 import { KOTLIN_VIEWMODEL, LAYOUT_XML } from './lib/androidCodeTemplates';
 
-const INITIAL_YEARS: AnnualData[] = Array.from({ length: 10 }, (_, i) => ({
-  year: i + 1,
-  extractionGranite: 0,
-  caGranite: 0,
-  extractionTuf: 0,
-  caTuf: 0,
-  matieresFournitures: 0,
-  services: 0,
-  fraisPersonnel: 0,
-  impotsTaxes: 0,
-  fraisFinanciers: 0,
-  dotationsAmortissements: 0,
-}));
+const INITIAL_YEARS: AnnualData[] = [
+  { year: 1, extractionGranite: 3500, caGranite: 0, extractionTuf: 45000, caTuf: 0, matieresFournitures: 8000000, services: 4000000, fraisPersonnel: 0, impotsTaxes: 850000, fraisFinanciers: 1200000, dotationsAmortissements: 0 },
+  { year: 2, extractionGranite: 4000, caGranite: 0, extractionTuf: 48000, caTuf: 0, matieresFournitures: 8200000, services: 4100000, fraisPersonnel: 0, impotsTaxes: 900000, fraisFinanciers: 1100000, dotationsAmortissements: 0 },
+  { year: 3, extractionGranite: 4500, caGranite: 0, extractionTuf: 50000, caTuf: 0, matieresFournitures: 8500000, services: 4200000, fraisPersonnel: 0, impotsTaxes: 950000, fraisFinanciers: 1000000, dotationsAmortissements: 0 },
+  { year: 4, extractionGranite: 5000, caGranite: 0, extractionTuf: 52000, caTuf: 0, matieresFournitures: 8800000, services: 4300000, fraisPersonnel: 0, impotsTaxes: 1000000, fraisFinanciers: 900000, dotationsAmortissements: 0 },
+  { year: 5, extractionGranite: 5500, caGranite: 0, extractionTuf: 55000, caTuf: 0, matieresFournitures: 9100000, services: 4400000, fraisPersonnel: 0, impotsTaxes: 1050000, fraisFinanciers: 800000, dotationsAmortissements: 0 },
+  { year: 6, extractionGranite: 5500, caGranite: 0, extractionTuf: 55000, caTuf: 0, matieresFournitures: 9300000, services: 4500000, fraisPersonnel: 0, impotsTaxes: 1100000, fraisFinanciers: 700000, dotationsAmortissements: 0 },
+  { year: 7, extractionGranite: 5500, caGranite: 0, extractionTuf: 55000, caTuf: 0, matieresFournitures: 9500000, services: 4600000, fraisPersonnel: 0, impotsTaxes: 1150000, fraisFinanciers: 600000, dotationsAmortissements: 0 },
+  { year: 8, extractionGranite: 5500, caGranite: 0, extractionTuf: 55000, caTuf: 0, matieresFournitures: 9700000, services: 4700000, fraisPersonnel: 0, impotsTaxes: 1200000, fraisFinanciers: 500000, dotationsAmortissements: 0 },
+  { year: 9, extractionGranite: 5500, caGranite: 0, extractionTuf: 55000, caTuf: 0, matieresFournitures: 9900000, services: 4800000, fraisPersonnel: 0, impotsTaxes: 1250000, fraisFinanciers: 400000, dotationsAmortissements: 0 },
+  { year: 10, extractionGranite: 5500, caGranite: 0, extractionTuf: 55000, caTuf: 0, matieresFournitures: 10100000, services: 4900000, fraisPersonnel: 0, impotsTaxes: 1300000, fraisFinanciers: 300000, dotationsAmortissements: 0 }
+];
+
+const INITIAL_ROLES: EmployeeRole[] = [
+  { id: "1", designation: "Directeur d'exploitation", count: 1, monthlySalary: 120000, hasExperience: true, allocation: "Common" },
+  { id: "2", designation: "Ingénieur des Mines", count: 1, monthlySalary: 95000, hasExperience: true, allocation: "Common" },
+  { id: "3", designation: "Chef d'équipe de carrière", count: 2, monthlySalary: 75000, hasExperience: true, allocation: "Common" },
+  { id: "4", designation: "Conducteur d'engins qualifié", count: 6, monthlySalary: 60000, hasExperience: false, allocation: "Common" },
+  { id: "5", designation: "Scieur au fil diamanté", count: 3, monthlySalary: 55000, hasExperience: false, allocation: "Granite" },
+  { id: "6", designation: "Foreur sur foreuse", count: 2, monthlySalary: 55000, hasExperience: false, allocation: "Common" },
+  { id: "7", designation: "Mécanicien de maintenance", count: 1, monthlySalary: 65000, hasExperience: true, allocation: "Common" },
+  { id: "8", designation: "Agent d'entretien et divers", count: 2, monthlySalary: 42000, hasExperience: false, allocation: "Common" },
+  { id: "9", designation: "Secrétaire/Comptable", count: 1, monthlySalary: 50000, hasExperience: true, allocation: "Common" },
+  { id: "10", designation: "Gardien/Sécurité", count: 3, monthlySalary: 45000, hasExperience: false, allocation: "Common" }
+];
+
+const INITIAL_MACHINES: OperationalMachine[] = [
+  { id: "m1", designation: "Excavateur principal CAT 336", count: 1, powerKw: 220, consumptionRate: 0.15, utilizationCoef: 0.7, hoursPerDay: 8, workDaysPerYear: 250, allocation: "Common" },
+  { id: "m2", designation: "Chargeuse sur pneus Komatsu WA470", count: 1, powerKw: 200, consumptionRate: 0.15, utilizationCoef: 0.6, hoursPerDay: 8, workDaysPerYear: 250, allocation: "Common" },
+  { id: "m3", designation: "Foreuse Hydraulique fond de trou", count: 1, powerKw: 110, consumptionRate: 0.14, utilizationCoef: 0.7, hoursPerDay: 6, workDaysPerYear: 200, allocation: "Granite" },
+  { id: "m4", designation: "Camion dumper articulé Volvo A30", count: 2, powerKw: 260, consumptionRate: 0.16, utilizationCoef: 0.5, hoursPerDay: 8, workDaysPerYear: 250, allocation: "Common" }
+];
+
+const INITIAL_ELECTRICITY_LINES: ElectricityLine[] = [
+  { id: "e1", designation: "Unité de concassage / Criblage Tuf", count: 1, powerKw: 132, utilizationCoef: 0.75, hoursPerDay: 8, workDaysPerYear: 250 },
+  { id: "e2", designation: "Châssis de Sciage Granite", count: 1, powerKw: 75, utilizationCoef: 0.7, hoursPerDay: 16, workDaysPerYear: 250 },
+  { id: "e3", designation: "Ateliers, compresseurs et bureaux", count: 1, powerKw: 30, utilizationCoef: 0.5, hoursPerDay: 8, workDaysPerYear: 250 }
+];
+
+const INITIAL_ACCESSORY_ITEMS: AccessoryItem[] = [
+  { id: "a1", designation: "Fil diamanté sciage", qtyPerYear: 120, unitPrice: 35000, unit: "m", allocation: "Granite" },
+  { id: "a2", designation: "Fleurets et taillants foreuse", qtyPerYear: 60, unitPrice: 8500, unit: "u", allocation: "Granite" },
+  { id: "a3", designation: "Lubrifiants et graisses machine", qtyPerYear: 800, unitPrice: 450, unit: "L", allocation: "Common" }
+];
+
+const INITIAL_EQUIPMENTS: Equipment[] = [
+  { id: "eq1", designation: "Excavateur CAT 336", category: "Équipements Lourds & Matériel", price: 25000000, duration: 10, allocation: "Common" },
+  { id: "eq2", designation: "Chargeuse Komatsu WA470", category: "Équipements Lourds & Matériel", price: 18000000, duration: 8, allocation: "Common" },
+  { id: "eq3", designation: "Foreuse Hydraulique", category: "Équipements Lourds & Matériel", price: 12000000, duration: 5, allocation: "Granite" },
+  { id: "eq4", designation: "Châssis Monolame", category: "Équipements Lourds & Matériel", price: 8000000, duration: 5, allocation: "Granite" },
+  { id: "eq5", designation: "Concasseur mobile", category: "Équipements Lourds & Matériel", price: 15000000, duration: 7, allocation: "Tuf" },
+  { id: "eq6", designation: "Camions dumpers Volvo (x2)", category: "Équipements Lourds & Matériel", price: 24000000, duration: 8, allocation: "Common" }
+];
+
+const INITIAL_WATER_CONFIG_WITH_ITEMS: WaterConfig = {
+  globalPrice: 40.95,
+  hasCustomPrices: false,
+  customPrices: Array(10).fill(40.95),
+  items: [
+    { id: "w1", designation: "Refroidissement fil diamanté (Sciage)", flowRate: 4000, hoursPerShift: 8, shiftsPerDay: 2, daysPerYear: 250, hoursPerYear: 4000, hasCustomHours: false, customHours: Array(10).fill(0) },
+    { id: "w2", designation: "Dépoussiérage pistes et concassage", flowRate: 1500, hoursPerShift: 4, shiftsPerDay: 1, daysPerYear: 200, hoursPerYear: 800, hasCustomHours: false, customHours: Array(10).fill(0) },
+    { id: "w3", designation: "Lavage engins et divers services", flowRate: 800, hoursPerShift: 2, shiftsPerDay: 1, daysPerYear: 250, hoursPerYear: 500, hasCustomHours: false, customHours: Array(10).fill(0) }
+  ]
+};
+
+const INITIAL_WATER_CONFIG: WaterConfig = INITIAL_WATER_CONFIG_WITH_ITEMS;
 
 const formatCurrency = (n: number) => {
   if (n === undefined || n === null || isNaN(n)) return '0';
@@ -117,15 +170,6 @@ const formatCompact = (n: number) => {
   } catch (e) {
     return '0';
   }
-};
-
-const INITIAL_EQUIPMENTS: Equipment[] = [];
-
-const INITIAL_WATER_CONFIG: WaterConfig = {
-  globalPrice: 40.95,
-  hasCustomPrices: false,
-  customPrices: Array(10).fill(40.95),
-  items: []
 };
 
 const INITIAL_PROD_CONFIG: ProductionDimensioning = {
@@ -248,7 +292,7 @@ export default function App() {
   const [decimalPlacesInput, setDecimalPlacesInput] = useState<string>((initialState?.decimalPlaces ?? 2).toString());
 
   // HR State
-  const [roles, setRoles] = useState<EmployeeRole[]>(initialState?.roles ?? []);
+  const [roles, setRoles] = useState<EmployeeRole[]>(initialState?.roles ?? INITIAL_ROLES);
   const [hrConfig, setHrConfig] = useState<HRConfig>(() => {
     const base = initialState?.hrConfig ?? {
       socialChargesRate: 0.26,
@@ -268,7 +312,7 @@ export default function App() {
 
   // Operational State
   const [machines, setMachines] = useState<OperationalMachine[]>(() => {
-    const base = initialState?.machines ?? [];
+    const base = initialState?.machines ?? INITIAL_MACHINES;
     return base.map((m: any) => ({
       ...m,
       hoursPerDay: m.hoursPerDay ?? initialState?.opConfig?.hoursPerDay ?? 8,
@@ -285,7 +329,7 @@ export default function App() {
 
   // Electricity State
   const [electricityLines, setElectricityLines] = useState<ElectricityLine[]>(() => {
-    const base = initialState?.electricityLines ?? [];
+    const base = initialState?.electricityLines ?? INITIAL_ELECTRICITY_LINES;
     return base.map((l: any) => ({
       ...l,
       hoursPerDay: l.hoursPerDay ?? initialState?.electricityConfig?.hoursPerDay ?? 8,
@@ -314,7 +358,7 @@ export default function App() {
   const [accessoryConfig, setAccessoryConfig] = useState<AccessoryConfig>(() => {
     const base = initialState?.accessoryConfig;
     return {
-      items: base?.items || []
+      items: base?.items || INITIAL_ACCESSORY_ITEMS
     };
   });
 
@@ -384,7 +428,7 @@ export default function App() {
       ...INITIAL_WATER_CONFIG,
       ...base,
       customPrices: base.customPrices ?? Array(10).fill(base.globalPrice ?? 40.95),
-      items: base.items || []
+      items: base.items || INITIAL_WATER_CONFIG.items
     };
   });
 
@@ -534,18 +578,18 @@ export default function App() {
     setUserNotes('');
     setYears(INITIAL_YEARS);
     setEquipments(INITIAL_EQUIPMENTS);
-    setRoles([]);
-    setHrConfig({ socialChargesRate: 0.26, annualIncreaseRate: 0.03, paidMonths: 12 });
+    setRoles(INITIAL_ROLES);
+    setHrConfig({ socialChargesRate: 0.26, annualIncreaseRate: 0.03, paidMonths: 12, experienceRate: 0.06 });
     setSocialChargesInput("26");
     setAnnualIncreaseInput("3");
     setExperienceRateInput("6");
-    setMachines([]);
+    setMachines(INITIAL_MACHINES);
     setOpConfig({ fuelPrice: 29, workDaysPerYear: 250, hoursPerDay: 8, annualInflationRate: 3 });
     setAnnualInflationInput("3");
-    setElectricityLines([]);
+    setElectricityLines(INITIAL_ELECTRICITY_LINES);
     setElectricityConfig({ cosPhi: 0.8, kvaPerGroup: 500, specificConsumption: 0.30, workDaysPerYear: 250, hoursPerDay: 8 });
-    setAccessoryConfig({ items: [] });
-    setWaterConfig(INITIAL_WATER_CONFIG);
+    setAccessoryConfig({ items: INITIAL_ACCESSORY_ITEMS });
+    setWaterConfig(INITIAL_WATER_CONFIG_WITH_ITEMS);
     setIbmRate(0.12);
     setIbmRateInput("12");
     setPriceGranite(4500);
@@ -558,8 +602,8 @@ export default function App() {
     setDensityTufInput("2.39");
     setDecimalPlaces(2);
     setDecimalPlacesInput("2");
-    setDmVs('1.5');
-    setDmCfu('1');
+    setDmVs('20');
+    setDmCfu('0.5');
     setDmHj('8');
     setDmJa('250');
     setDmN('1');
