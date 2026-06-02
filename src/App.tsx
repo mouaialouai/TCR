@@ -249,7 +249,21 @@ export default function App() {
   const loadInitialState = () => {
     try {
       const saved = window.localStorage.getItem(SAVE_KEY);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // If the state is empty or dummy (e.g. no equipments, or all granite extraction values are zeroes),
+        // we force fallback to our rich default prefilled datasets.
+        if (
+          !parsed ||
+          !parsed.equipments ||
+          parsed.equipments.length === 0 ||
+          !parsed.years ||
+          parsed.years.every((y: any) => (y.extractionGranite || 0) === 0)
+        ) {
+          return null;
+        }
+        return parsed;
+      }
     } catch (e) {
       console.error("Erreur lors du chargement de la sauvegarde :", e);
     }
@@ -532,18 +546,18 @@ export default function App() {
       setUserNotes(data.userNotes ?? '');
       setYears(data.years ?? INITIAL_YEARS);
       setEquipments(data.equipments ?? INITIAL_EQUIPMENTS);
-      setRoles(data.roles ?? []);
-      setHrConfig(data.hrConfig ?? { socialChargesRate: 0.26, annualIncreaseRate: 0.03, paidMonths: 12 });
+      setRoles(data.roles && data.roles.length > 0 ? data.roles : INITIAL_ROLES);
+      setHrConfig(data.hrConfig ?? { socialChargesRate: 0.26, annualIncreaseRate: 0.03, paidMonths: 12, experienceRate: 0.06 });
       setSocialChargesInput(((data.hrConfig?.socialChargesRate ?? 0.26) * 100).toString());
       setAnnualIncreaseInput(((data.hrConfig?.annualIncreaseRate ?? 0.03) * 100).toString());
       setExperienceRateInput(((data.hrConfig?.experienceRate ?? 0.06) * 100).toString());
-      setMachines(data.machines ?? []);
+      setMachines(data.machines && data.machines.length > 0 ? data.machines : INITIAL_MACHINES);
       setOpConfig(data.opConfig ?? { fuelPrice: 29, workDaysPerYear: 250, hoursPerDay: 8, annualInflationRate: 3 });
       setAnnualInflationInput((data.opConfig?.annualInflationRate ?? 3).toString());
-      setElectricityLines(data.electricityLines ?? []);
+      setElectricityLines(data.electricityLines && data.electricityLines.length > 0 ? data.electricityLines : INITIAL_ELECTRICITY_LINES);
       setElectricityConfig(data.electricityConfig ?? { cosPhi: 0.8, kvaPerGroup: 500, specificConsumption: 0.30, workDaysPerYear: 250, hoursPerDay: 8 });
-      setAccessoryConfig(data.accessoryConfig ?? { items: [] });
-      setWaterConfig(data.waterConfig ?? INITIAL_WATER_CONFIG);
+      setAccessoryConfig(data.accessoryConfig ?? { items: INITIAL_ACCESSORY_ITEMS });
+      setWaterConfig(data.waterConfig ?? INITIAL_WATER_CONFIG_WITH_ITEMS);
       setIbmRate(data.ibmRate ?? 0.12);
       setIbmRateInput(((data.ibmRate ?? 0.12) * 100).toString());
       setPriceGranite(data.priceGranite ?? 4500);
