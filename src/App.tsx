@@ -45,11 +45,7 @@ import {
   ExternalLink,
   Mountain,
   Building,
-  Zap,
-  Cloud,
-  LogIn,
-  LogOut,
-  RefreshCw
+  Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -92,28 +88,6 @@ import { cn } from './lib/utils';
 import { AnnualData, Equipment, EmployeeRole, HRConfig, OperationalMachine, OperationalConfig, InvestmentCategory, CalculationSnapshot, ElectricityLine, ElectricityConfig, AccessoryConfig, AccessoryItem, Allocation, AccessoryCalculationMode, ProductionDimensioning, FullYearData, WaterConfig, WaterItem } from './types';
 import { calculateYear, calculateTotals, getAmortizationSchedule, getHRCosts, getOperationalCosts, getElectricityCosts, getAccessoryCosts, SplitCosts, getWaterCosts } from './lib/calculations';
 import { KOTLIN_VIEWMODEL, LAYOUT_XML } from './lib/androidCodeTemplates';
-
-// Firebase Imports
-import { 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  signOut, 
-  onAuthStateChanged,
-  User as FirebaseUser
-} from "firebase/auth";
-import { 
-  collection, 
-  doc, 
-  getDocs, 
-  getDocFromServer, 
-  setDoc, 
-  deleteDoc, 
-  query, 
-  where, 
-  orderBy 
-} from "firebase/firestore";
-import { db, auth, OperationType, handleFirestoreError } from "./lib/firebase";
-
 
 const INITIAL_YEARS: AnnualData[] = Array.from({ length: 10 }, (_, i) => ({
   year: i + 1,
@@ -447,210 +421,6 @@ export default function App() {
     // Reset toast state after 3 seconds
     const timer = setTimeout(() => setToast(null), 3000);
     return () => clearTimeout(timer);
-  };
-
-  // Firebase auth & cloud studies state
-  const [fbUser, setFbUser] = useState<FirebaseUser | null>(null);
-  const [isAuthLoading, setIsAuthLoading] = useState(true);
-  const [cloudStudies, setCloudStudies] = useState<any[]>([]);
-  const [isCloudLoading, setIsCloudLoading] = useState(false);
-
-  // Test connection to Firestore
-  useEffect(() => {
-    async function testConnection() {
-      try {
-        await getDocFromServer(doc(db, 'test', 'connection'));
-      } catch (error) {
-        if (error instanceof Error && error.message.includes('the client is offline')) {
-          console.error("Please check your Firebase configuration.");
-        }
-      }
-    }
-    testConnection();
-  }, []);
-
-  // Fetch Cloud Saved Scenarios from Firestore
-  const fetchCloudStudies = async (uid: string) => {
-    setIsCloudLoading(true);
-    try {
-      const q = query(
-        collection(db, "studies"),
-        where("userId", "==", uid)
-      );
-      const querySnapshot = await getDocs(q);
-      const studies: any[] = [];
-      querySnapshot.forEach((docSnap) => {
-        studies.push({
-          id: docSnap.id,
-          ...docSnap.data()
-        });
-      });
-      // Sort in memory by lastSaved descending
-      studies.sort((a, b) => new Date(b.lastSaved).getTime() - new Date(a.lastSaved).getTime());
-      setCloudStudies(studies);
-    } catch (err) {
-      console.error("Error fetching cloud studies:", err);
-      showToast("Erreur lors de la récupération des sauvegardes Cloud", "error");
-    } finally {
-      setIsCloudLoading(false);
-    }
-  };
-
-  // Auth connection listener
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      setFbUser(u);
-      setIsAuthLoading(false);
-      if (u) {
-        fetchCloudStudies(u.uid);
-      } else {
-        setCloudStudies([]);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Sign in with Google Popup
-  const handleGoogleSignIn = async () => {
-    try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
-      const result = await signInWithPopup(auth, provider);
-      if (result.user) {
-        setFbUser(result.user);
-        showToast(`Bienvenue, ${result.user.displayName || "Utilisateur"} !`, "success");
-        fetchCloudStudies(result.user.uid);
-      }
-    } catch (err: any) {
-      console.error("Sign in failed:", err);
-      showToast("La connexion a échoué. Veuillez réessayer.", "error");
-    }
-  };
-
-  // Sign out
-  const handleSignOut = async () => {
-    try {
-      await signOut(auth);
-      setFbUser(null);
-      setCloudStudies([]);
-      showToast("Déconnexion réussie.", "info");
-    } catch (err) {
-      console.error("Sign out failed:", err);
-      showToast("Erreur de déconnexion", "error");
-    }
-  };
-
-  // Save current scenario to Firestore Cloud
-  const handleSaveToCloud = async (name: string) => {
-    if (!fbUser) {
-      showToast("Veuillez vous connecter pour sauvegarder dans le cloud.", "error");
-      return;
-    }
-    const finalName = name.trim() || `TCR GRANITE - ${new Date().toLocaleDateString('fr-DZ')} ${new Date().toLocaleTimeString('fr-DZ')}`;
-    const path = "studies";
-    try {
-      const studyData = {
-        userId: fbUser.uid,
-        saveName: finalName,
-        userNotes: userNotes || '',
-        years,
-        equipments,
-        roles,
-        hrConfig,
-        machines,
-        opConfig,
-        electricityLines,
-        electricityConfig,
-        accessoryConfig,
-        waterConfig,
-        ibmRate,
-        priceGranite,
-        densityGranite,
-        priceTuf,
-        densityTuf,
-        decimalPlaces,
-        dmParams: { vs: dmVs, cfu: dmCfu, hj: dmHj, ja: dmJa, n: dmN },
-        productionConfig,
-        lastSaved: new Date().toISOString()
-      };
-
-      const newDocRef = doc(collection(db, "studies"));
-      await setDoc(newDocRef, studyData);
-      
-      showToast(`Scénario "${finalName}" enregistré dans le Cloud !`, "success");
-      fetchCloudStudies(fbUser.uid);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, path);
-    }
-  };
-
-  // Delete a cloud document
-  const handleDeleteFromCloud = async (studyId: string) => {
-    if (!fbUser) return;
-    const path = `studies/${studyId}`;
-    try {
-      await deleteDoc(doc(db, "studies", studyId));
-      showToast("Document Cloud supprimé", "success");
-      fetchCloudStudies(fbUser.uid);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, path);
-    }
-  };
-
-  // Synchronize internal localStorage history items to Firestore
-  const handleSyncLocalToCloud = async () => {
-    if (!fbUser) {
-      showToast("Connectez-vous d'abord pour synchroniser", "error");
-      return;
-    }
-    if (!Array.isArray(history) || history.length === 0) {
-      showToast("Aucun historique local à synchroniser", "info");
-      return;
-    }
-    
-    setIsCloudLoading(true);
-    let successCount = 0;
-    try {
-      for (const localSave of history) {
-        const alreadyExists = cloudStudies.some(c => c.saveName === localSave.saveName);
-        if (!alreadyExists) {
-          const studyData = {
-            userId: fbUser.uid,
-            saveName: localSave.saveName || "Sauvegarde sans nom",
-            userNotes: localSave.userNotes || '',
-            years: localSave.years || INITIAL_YEARS,
-            equipments: localSave.equipments || [],
-            roles: localSave.roles || [],
-            hrConfig: localSave.hrConfig || { socialChargesRate: 0.26, annualIncreaseRate: 0.03, paidMonths: 12 },
-            machines: localSave.machines || [],
-            opConfig: localSave.opConfig || { fuelPrice: 29, workDaysPerYear: 250, hoursPerDay: 8, annualInflationRate: 3 },
-            electricityLines: localSave.electricityLines || [],
-            electricityConfig: localSave.electricityConfig || { cosPhi: 0.8, kvaPerGroup: 500, specificConsumption: 0.30, workDaysPerYear: 250, hoursPerDay: 8 },
-            accessoryConfig: localSave.accessoryConfig || { items: [] },
-            waterConfig: localSave.waterConfig || INITIAL_WATER_CONFIG,
-            ibmRate: localSave.ibmRate ?? 0.12,
-            priceGranite: localSave.priceGranite ?? 4500,
-            densityGranite: localSave.densityGranite ?? 2.49,
-            priceTuf: localSave.priceTuf ?? 3500,
-            densityTuf: localSave.densityTuf ?? 2.39,
-            decimalPlaces: localSave.decimalPlaces ?? 2,
-            dmParams: localSave.dmParams || { vs: dmVs, cfu: dmCfu, hj: dmHj, ja: dmJa, n: dmN },
-            productionConfig: localSave.productionConfig || INITIAL_PROD_CONFIG,
-            lastSaved: localSave.lastSaved || new Date().toISOString()
-          };
-          const newDocRef = doc(collection(db, "studies"));
-          await setDoc(newDocRef, studyData);
-          successCount++;
-        }
-      }
-      showToast(`${successCount} sauvegardes locales synchronisées avec le Cloud !`, "success");
-      fetchCloudStudies(fbUser.uid);
-    } catch (err) {
-      console.error("Local-to-cloud sync failure:", err);
-      showToast("Une erreur est survenue lors de la synchronisation", "error");
-    } finally {
-      setIsCloudLoading(false);
-    }
   };
 
   const handleSave = (customName?: string) => {
@@ -5142,96 +4912,33 @@ export default function App() {
                 transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
                 className="flex-1 overflow-y-auto pr-2 custom-scrollbar pb-10"
               >
-                <div className="max-w-4xl mx-auto space-y-8">
-                  
-                  {/* Cloud Connection Panel */}
-                  <div className="bg-sleek-card rounded-[2.5rem] p-8 border border-sleek-border shadow-xl relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl -z-10" />
-                    <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl -z-10" />
-                    
-                    {!fbUser ? (
-                      <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2.5">
-                            <span className="bg-indigo-500/15 text-indigo-500 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider font-mono flex items-center gap-1">
-                              <Cloud className="animate-bounce" size={10} /> Nouveau : Synchronisation Cloud
-                            </span>
-                          </div>
-                          <h3 className="text-xl font-bold text-sleek-text-main">
-                            Conserver vos scénarios même après déploiement sur Vercel
-                          </h3>
-                          <p className="text-xs text-sleek-text-muted max-w-xl leading-relaxed">
-                            Connectez-vous pour sauvegarder vos calculs dans une base de données cloud sécurisée. Vous pourrez recharger vos simulations de n'importe où, sur n'importe quel appareil, même après la conversion en site web de production.
-                          </p>
-                        </div>
-                        <button
-                          onClick={handleGoogleSignIn}
-                          className="flex items-center gap-2.5 px-6 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black uppercase tracking-widest rounded-2xl shadow-lg shadow-indigo-600/20 active:scale-95 transition-all w-full md:w-auto justify-center cursor-pointer"
-                        >
-                          <LogIn size={15} />
-                          Se connecter avec Google
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-                        <div className="flex items-center gap-4">
-                          {fbUser.photoURL ? (
-                            <img src={fbUser.photoURL} alt="Avatar" className="w-14 h-14 rounded-full border-2 border-indigo-500/20 shadow-inner" />
-                          ) : (
-                            <div className="w-14 h-14 bg-indigo-500/10 text-indigo-600 rounded-full flex items-center justify-center font-black text-xl">
-                              {fbUser.displayName?.charAt(0) || "U"}
-                            </div>
-                          )}
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-bold text-sleek-text-main">{fbUser.displayName}</span>
-                              <span className="bg-emerald-500/10 text-emerald-600 text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-emerald-500/20 flex items-center gap-1 shadow-sm font-mono">
-                                <Cloud size={8} /> Connecté Cloud
-                              </span>
-                            </div>
-                            <p className="text-xs text-sleek-text-muted font-mono">{fbUser.email}</p>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-                          <button
-                            onClick={handleSyncLocalToCloud}
-                            disabled={isCloudLoading}
-                            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border border-indigo-500/20"
-                            title="Téléverser l'historique de cet ordinateur vers votre espace sésurisé en ligne"
-                          >
-                            <RefreshCw size={13} className={isCloudLoading ? "animate-spin" : ""} />
-                            Sync locales ➔ Cloud
-                          </button>
-                          
-                          <button
-                            onClick={handleSignOut}
-                            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-red-500/5 hover:bg-red-500/10 text-red-500 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border border-red-500/20"
-                          >
-                            <LogOut size={13} />
-                            Se déconnecter
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Master Backup Card */}
+                <div className="max-w-4xl mx-auto">
                   <div className="bg-sleek-card rounded-[2.5rem] p-10 border border-sleek-border shadow-xl">
                     <div className="flex items-center justify-between mb-8">
                        <h2 className="text-2xl font-black text-sleek-text-main flex items-center gap-3">
                          <div className="w-10 h-10 bg-indigo-500/10 rounded-xl flex items-center justify-center text-indigo-600">
                            <History size={20} />
                          </div>
-                         Création d'une version
+                         Historique des Sauvegardes
                        </h2>
+                       <button 
+                         onClick={() => {
+                           if (confirm("Voulez-vous vraiment vider tout l'historique ?\nهل تريد حقاً مسح سجل الحفظ بالكامل؟")) {
+                             setHistory([]);
+                             showToast("Historique vidé");
+                           }
+                         }}
+                         className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-red-500 hover:bg-red-500/10 rounded-xl transition-all border border-red-500/20"
+                       >
+                         Vider l'Historique
+                       </button>
                     </div>
 
-                    {/* Enregistrer la configuration actuelle - TCR GRANITE */}
+                    {/* Formulaire de Sauvegarde Météo - TCR GRANITE */}
                     <div className="bg-gradient-to-br from-indigo-500/5 to-purple-500/5 rounded-3xl p-6 border border-indigo-500/10 mb-8 shadow-sm">
                        <h3 className="text-xs font-bold text-indigo-500 uppercase tracking-widest mb-4 flex items-center gap-2">
                          <PlusCircle size={14} className="text-indigo-500 animate-pulse" />
-                         Nommer la simulation actuelle (حفظ مسمى)
+                         Enregistrer la configuration actuelle (حفظ مسمى)
                        </h3>
                        <div className="flex flex-col md:flex-row gap-4 items-end">
                          <div className="flex-1 space-y-1.5 w-full">
@@ -5248,219 +4955,101 @@ export default function App() {
                            <button 
                              type="button"
                              onClick={() => setCustomSaveName("TCR GRANITE")}
-                             className="flex-1 md:flex-initial px-3.5 py-2.5 bg-sleek-bg border border-sleek-border rounded-xl text-[9px] font-extrabold uppercase tracking-widest text-sleek-text-muted hover:border-emerald-500/40 hover:text-emerald-500 transition-all font-mono animate-none active:scale-95"
+                             className="flex-1 md:flex-initial px-3.5 py-2.5 bg-sleek-bg border border-sleek-border rounded-xl text-[9px] font-extrabold uppercase tracking-widest text-sleek-text-muted hover:border-emerald-500/40 hover:text-emerald-500 transition-all font-mono"
                            >
                              TCR GRANITE
                            </button>
                            <button 
                              type="button"
                              onClick={() => setCustomSaveName("TCR TUF")}
-                             className="flex-1 md:flex-initial px-3.5 py-2.5 bg-sleek-bg border border-sleek-border rounded-xl text-[9px] font-extrabold uppercase tracking-widest text-sleek-text-muted hover:border-indigo-500/40 hover:text-indigo-500 transition-all font-mono animate-none active:scale-95"
+                             className="flex-1 md:flex-initial px-3.5 py-2.5 bg-sleek-bg border border-sleek-border rounded-xl text-[9px] font-extrabold uppercase tracking-widest text-sleek-text-muted hover:border-indigo-500/40 hover:text-indigo-500 transition-all font-mono"
                            >
                              TCR TUF
                            </button>
                          </div>
-                         
-                         <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-                            <button 
-                              onClick={() => {
-                                if (!customSaveName.trim()) {
-                                  showToast("Veuillez entrer un nom", "error");
-                                  return;
-                                }
-                                handleSave(customSaveName.trim());
-                              }}
-                              className="flex items-center gap-2 px-5 py-2.5 bg-sleek-bg hover:bg-sleek-bg/80 border border-sleek-border text-sleek-text-main text-[10px] font-black uppercase tracking-widest rounded-xl hover:scale-[1.02] active:scale-95 transition-all justify-center cursor-pointer"
-                            >
-                              <Save size={14} className="text-sleek-text-muted" />
-                              Local (🖥️)
-                            </button>
-
-                            <button 
-                              onClick={() => {
-                                if (!fbUser) {
-                                  showToast("Veuillez vous connecter avec votre compte Google.", "error");
-                                  handleGoogleSignIn();
-                                  return;
-                                }
-                                if (!customSaveName.trim()) {
-                                  showToast("Veuillez entrer un nom", "error");
-                                  return;
-                                }
-                                handleSaveToCloud(customSaveName.trim());
-                              }}
-                              className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-indigo-600/25 hover:scale-[1.02] active:scale-95 transition-all justify-center cursor-pointer"
-                            >
-                              <Cloud size={14} />
-                              Cloud (☁️)
-                            </button>
-                         </div>
+                         <button 
+                           onClick={() => {
+                             if (!customSaveName.trim()) {
+                               showToast("Veuillez entrer un nom", "error");
+                               return;
+                             }
+                             handleSave(customSaveName.trim());
+                           }}
+                           className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-indigo-600/25 hover:scale-[1.02] active:scale-95 transition-all w-full md:w-auto justify-center"
+                         >
+                           <Save size={14} />
+                           Enregistrer
+                         </button>
                        </div>
                     </div>
 
-                    {/* TWO COLYMNS / LISTS FOR SECURE DATABASE PREVIEW */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-10">
-                      
-                      {/* Left: Cloud Scenarios List */}
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-between border-b border-sleek-border/70 pb-3">
-                          <h3 className="text-sm font-black text-sleek-text-main flex items-center gap-2">
-                            <span className="p-1.5 bg-indigo-500/10 rounded-lg text-indigo-600">
-                              <Cloud size={14} />
-                            </span>
-                            Scénarios Cloud (☁️ En Ligne)
-                          </h3>
-                          {fbUser && (
-                            <span className="text-[10px] font-extrabold text-sleek-text-muted font-mono bg-sleek-bg px-2.5 py-1 rounded-full border border-sleek-border shadow-sm">
-                              {cloudStudies.length} versions
-                            </span>
-                          )}
+                    {(!Array.isArray(history) || history.length === 0) ? (
+                       <div className="flex flex-col items-center justify-center py-20 bg-sleek-bg/50 rounded-3xl border border-dashed border-sleek-border/50">
+                         <Clock size={48} className="text-sleek-text-muted/20 mb-4" />
+                         <p className="text-sm font-bold text-sleek-text-muted opacity-40 uppercase tracking-widest">Aucune sauvegarde trouvée</p>
+                         <p className="text-[10px] text-sleek-text-muted opacity-30 mt-1 uppercase tracking-widest">Entrez un nom ci-dessus pour réaliser votre premier enregistrement</p>
+                       </div>
+                    ) : (
+                       <div className="space-y-4">
+                         {Array.isArray(history) && history.map((save, idx) => (
+                           <div key={idx} className="group relative bg-sleek-bg/40 border border-sleek-border hover:border-sleek-primary/30 hover:bg-sleek-card rounded-2xl p-6 transition-all shadow-sm hover:shadow-xl">
+                             <div className="flex items-center justify-between">
+                               <div className="flex flex-col gap-1.5">
+                                 <div className="flex items-center gap-2 flex-wrap">
+                                   {save.saveName ? (
+                                     <div className="flex items-center gap-1.5">
+                                       <span className="bg-indigo-500/10 text-indigo-600 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full border border-indigo-500/20 shadow-sm font-mono">
+                                         {save.saveName}
+                                       </span>
+                                       <span className="text-[10px] text-sleek-text-muted font-bold opacity-60">
+                                         ({new Date(save.lastSaved).toLocaleString('fr-DZ', { dateStyle: 'short', timeStyle: 'short' })})
+                                       </span>
+                                     </div>
+                                   ) : (
+                                     <span className="text-xs font-black text-sleek-text-main group-hover:text-sleek-primary transition-colors">
+                                       {new Date(save.lastSaved).toLocaleString('fr-DZ', { dateStyle: 'long', timeStyle: 'short' })}
+                                     </span>
+                                   )}
+                                   {idx === 0 && <span className="bg-emerald-500/10 text-emerald-600 text-[8px] font-black uppercase px-2 py-0.5 rounded-full border border-emerald-500/20">Dernière</span>}
+                                 </div>
+                                 <span className="text-[10px] text-sleek-text-muted font-bold opacity-60 uppercase tracking-widest">
+                                   {save.years?.length || 0} Ans • {save.equipments?.length || 0} Equipements • {save.roles?.length || 0} Employés
+                                 </span>
+                               </div>
+                               
+                               <div className="flex items-center gap-2">
+                                 <button 
+                                   onClick={() => restoreFromHistory(save)}
+                                   className="flex items-center gap-2 px-5 py-2.5 bg-sleek-primary text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-sleek-primary/20 hover:scale-105 active:scale-95 transition-all"
+                                 >
+                                   <Undo2 size={14} />
+                                   Restaurer
+                                 </button>
+                                 <button 
+                                   onClick={() => {
+                                     if (confirm("Voulez-vous supprimer cette sauvegarde ?\nهل تريد حذف نسخة الحفظ هذه؟")) {
+                                       setHistory(prev => (prev || []).filter((_, i) => i !== idx));
+                                       showToast("Supprimé");
+                                     }
+                                   }}
+                                   className="p-2.5 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all border border-red-500/20"
+                                 >
+                                   <Trash2 size={16} />
+                                 </button>
+                               </div>
+                             </div>
+                             
+                             {save.userNotes && (
+                               <div className="mt-4 pt-4 border-t border-sleek-border/50">
+                                 <p className="text-[10px] text-sleek-text-muted font-medium italic line-clamp-2">
+                                   Note: {save.userNotes}
+                                 </p>
+                               </div>
+                              )}
+                            </div>
+                          ))}
                         </div>
-
-                        {!fbUser ? (
-                          <div className="flex flex-col items-center justify-center p-8 bg-sleek-bg/20 rounded-2xl border border-dashed border-sleek-border/80 text-center space-y-3">
-                            <Cloud size={24} className="text-sleek-text-muted opacity-30" />
-                            <p className="text-[11px] font-bold text-sleek-text-muted opacity-80 uppercase tracking-widest leading-relaxed">
-                              🔒 Section Cloud Verrouillée
-                            </p>
-                            <span className="text-[9px] text-sleek-text-muted opacity-60 leading-normal block max-w-xs">
-                              Connectez-vous avec Google ci-dessus pour accéder à votre espace de stockage sécurisé et permanent.
-                            </span>
-                          </div>
-                        ) : isCloudLoading ? (
-                          <div className="flex flex-col items-center justify-center py-12">
-                            <RefreshCw className="animate-spin text-indigo-600 mb-2" size={24} />
-                            <span className="text-[9px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-50">Chargement de la base cloud...</span>
-                          </div>
-                        ) : cloudStudies.length === 0 ? (
-                          <div className="flex flex-col items-center justify-center py-10 bg-sleek-bg/20 rounded-2xl border border-dashed border-sleek-border/80 text-center">
-                            <Cloud size={24} className="text-indigo-600/20 mb-2" />
-                            <p className="text-[10px] font-bold text-sleek-text-muted opacity-60 uppercase tracking-widest">Aucune sauvegarde Cloud</p>
-                            <span className="text-[8px] text-sleek-text-muted opacity-40 mt-1 max-w-xs">Enregistrez un scénario Cloud ci-dessus ou importez vos configurations de cet ordi.</span>
-                          </div>
-                        ) : (
-                          <div className="space-y-3 max-h-[480px] overflow-y-auto pr-1">
-                            {cloudStudies.map((save) => (
-                              <div key={save.id} className="group relative bg-sleek-bg/40 border border-sleek-border hover:border-indigo-500/30 hover:bg-sleek-card rounded-2xl p-5 transition-all shadow-sm">
-                                <div className="flex items-center justify-between">
-                                  <div className="flex flex-col gap-1.5">
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="bg-indigo-500/10 text-indigo-600 text-[9px] font-black uppercase px-2.5 py-0.5 rounded-full border border-indigo-500/20 shadow-sm font-mono">
-                                        {save.saveName}
-                                      </span>
-                                      <span className="text-[9px] text-sleek-text-muted font-bold opacity-60 font-mono">
-                                        ({new Date(save.lastSaved).toLocaleString('fr-DZ', { dateStyle: 'short', timeStyle: 'short' })})
-                                      </span>
-                                    </div>
-                                    <span className="text-[8px] text-sleek-text-muted font-bold opacity-60 uppercase tracking-widest">
-                                      {save.years?.length || 0} Ans • {save.equipments?.length || 0} Equip. • {save.roles?.length || 0} RH
-                                    </span>
-                                  </div>
-                                  
-                                  <div className="flex items-center gap-1.5">
-                                    <button 
-                                      onClick={() => restoreFromHistory(save)}
-                                      className="flex items-center gap-1 px-3.5 py-2 bg-indigo-600 text-white text-[9px] font-black uppercase tracking-widest rounded-lg shadow-sm hover:scale-105 active:scale-95 transition-all cursor-pointer"
-                                      title="Restaurer cette version en direct"
-                                    >
-                                      <Undo2 size={12} />
-                                      Charger
-                                    </button>
-                                    <button 
-                                      onClick={() => {
-                                        if (confirm("Voulez-vous supprimer ce scénario Cloud DEFINITIVEMENT ?\nهل تريد حذف هذه النسخة الاحتياطية السحابية نهائياً؟")) {
-                                          handleDeleteFromCloud(save.id);
-                                        }
-                                      }}
-                                      className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all border border-red-500/20 cursor-pointer"
-                                    >
-                                      <Trash2 size={12} />
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Right: Local Storage Scenarios List */}
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-between border-b border-sleek-border/70 pb-3">
-                          <h3 className="text-sm font-black text-sleek-text-main flex items-center gap-2">
-                            <span className="p-1.5 bg-emerald-500/10 rounded-lg text-emerald-600">
-                              <HardDrive size={14} />
-                            </span>
-                            Scénarios Locaux (🖥️ Ce Navigateur)
-                          </h3>
-                          <button 
-                            onClick={() => {
-                              if (confirm("Voulez-vous vraiment vider tout l'historique local ?\nهل تريد حقاً مسح سجل الحفظ بالكامل؟")) {
-                                setHistory([]);
-                                showToast("Historique local vidé");
-                              }
-                            }}
-                            className="text-[9px] font-bold uppercase tracking-wider text-red-500 hover:underline px-1 py-0.5"
-                          >
-                            Vider local
-                          </button>
-                        </div>
-
-                        {(!Array.isArray(history) || history.length === 0) ? (
-                          <div className="flex flex-col items-center justify-center py-10 bg-sleek-bg/20 rounded-2xl border border-dashed border-sleek-border/80 text-center">
-                            <Clock size={24} className="text-sleek-text-muted opacity-30 mb-2" />
-                            <p className="text-[10px] font-bold text-sleek-text-muted opacity-40 uppercase tracking-widest">Aucune sauvegarde locale</p>
-                            <span className="text-[8px] text-sleek-text-muted opacity-30 mt-1 max-w-xs">Réalisez un enregistrement local pour lister vos simulations ici.</span>
-                          </div>
-                        ) : (
-                          <div className="space-y-3 max-h-[480px] overflow-y-auto pr-1">
-                            {history.map((save, idx) => (
-                              <div key={idx} className="group relative bg-sleek-bg/40 border border-sleek-border hover:border-emerald-500/30 hover:bg-sleek-card rounded-2xl p-5 transition-all shadow-sm">
-                                <div className="flex items-center justify-between">
-                                  <div className="flex flex-col gap-1.5">
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="bg-emerald-500/10 text-emerald-600 text-[9px] font-black uppercase px-2.5 py-0.5 rounded-full border border-emerald-500/20 shadow-sm font-mono">
-                                        {save.saveName || "Simulation sans nom"}
-                                      </span>
-                                      <span className="text-[9px] text-sleek-text-muted font-bold opacity-60 font-mono">
-                                        ({new Date(save.lastSaved).toLocaleString('fr-DZ', { dateStyle: 'short', timeStyle: 'short' })})
-                                      </span>
-                                    </div>
-                                    <span className="text-[8px] text-sleek-text-muted font-bold opacity-60 uppercase tracking-widest">
-                                      {save.years?.length || 0} Ans • {save.equipments?.length || 0} Equip. • {save.roles?.length || 0} RH
-                                    </span>
-                                  </div>
-                                  
-                                  <div className="flex items-center gap-1.5">
-                                    <button 
-                                      onClick={() => restoreFromHistory(save)}
-                                      className="flex items-center gap-1 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-black uppercase tracking-widest rounded-lg shadow-sm hover:scale-105 active:scale-95 transition-all cursor-pointer"
-                                      title="Restaurer cette version locale"
-                                    >
-                                      <Undo2 size={12} />
-                                      Charger
-                                    </button>
-                                    <button 
-                                      onClick={() => {
-                                        if (confirm("Voulez-vous supprimer cette sauvegarde locale ?")) {
-                                          setHistory(prev => (prev || []).filter((_, i) => i !== idx));
-                                          showToast("Supprimé");
-                                        }
-                                      }}
-                                      className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all border border-red-500/20 cursor-pointer"
-                                    >
-                                      <Trash2 size={12} />
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                    </div>
-
+                     )}
                   </div>
                 </div>
               </motion.div>
