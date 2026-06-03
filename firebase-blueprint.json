@@ -1,0 +1,41 @@
+{
+  "entities": {
+    "Study": {
+      "title": "Study",
+      "description": "A saved mining feasibility study and calculation scenario.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "saveName": { "type": "string" },
+        "userNotes": { "type": "string" },
+        "years": { "type": "array" },
+        "equipments": { "type": "array" },
+        "roles": { "type": "array" },
+        "hrConfig": { "type": "object" },
+        "machines": { "type": "array" },
+        "opConfig": { "type": "object" },
+        "electricityLines": { "type": "array" },
+        "electricityConfig": { "type": "object" },
+        "accessoryConfig": { "type": "object" },
+        "waterConfig": { "type": "object" },
+        "ibmRate": { "type": "number" },
+        "priceGranite": { "type": "number" },
+        "densityGranite": { "type": "number" },
+        "priceTuf": { "type": "number" },
+        "densityTuf": { "type": "number" },
+        "decimalPlaces": { "type": "number" },
+        "dmParams": { "type": "object" },
+        "productionConfig": { "type": "object" },
+        "lastSaved": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "saveName", "lastSaved"]
+    }
+  },
+  "firestore": {
+    "/studies/{studyId}": {
+      "schema": "Study",
+      "description": "Feasibility studies saved under users."
+    }
+  }
+}

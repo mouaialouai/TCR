@@ -45,7 +45,11 @@ import {
   ExternalLink,
   Mountain,
   Building,
-  Zap
+  Zap,
+  Cloud,
+  LogIn,
+  LogOut,
+  RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -89,87 +93,41 @@ import { AnnualData, Equipment, EmployeeRole, HRConfig, OperationalMachine, Oper
 import { calculateYear, calculateTotals, getAmortizationSchedule, getHRCosts, getOperationalCosts, getElectricityCosts, getAccessoryCosts, SplitCosts, getWaterCosts } from './lib/calculations';
 import { KOTLIN_VIEWMODEL, LAYOUT_XML } from './lib/androidCodeTemplates';
 
-const INITIAL_YEARS_GRANITE: AnnualData[] = [
-  { year: 1, extractionGranite: 3500, caGranite: 0, extractionTuf: 0, caTuf: 0, matieresFournitures: 8000000, services: 4000000, fraisPersonnel: 0, impotsTaxes: 850000, fraisFinanciers: 1200000, dotationsAmortissements: 0 },
-  { year: 2, extractionGranite: 4000, caGranite: 0, extractionTuf: 0, caTuf: 0, matieresFournitures: 8200000, services: 4100000, fraisPersonnel: 0, impotsTaxes: 900000, fraisFinanciers: 1100000, dotationsAmortissements: 0 },
-  { year: 3, extractionGranite: 4500, caGranite: 0, extractionTuf: 0, caTuf: 0, matieresFournitures: 8500000, services: 4200000, fraisPersonnel: 0, impotsTaxes: 950000, fraisFinanciers: 1000000, dotationsAmortissements: 0 },
-  { year: 4, extractionGranite: 5000, caGranite: 0, extractionTuf: 0, caTuf: 0, matieresFournitures: 8800000, services: 4300000, fraisPersonnel: 0, impotsTaxes: 1000000, fraisFinanciers: 900000, dotationsAmortissements: 0 },
-  { year: 5, extractionGranite: 5500, caGranite: 0, extractionTuf: 0, caTuf: 0, matieresFournitures: 9100000, services: 4400000, fraisPersonnel: 0, impotsTaxes: 1050000, fraisFinanciers: 800000, dotationsAmortissements: 0 },
-  { year: 6, extractionGranite: 5500, caGranite: 0, extractionTuf: 0, caTuf: 0, matieresFournitures: 9300000, services: 4500000, fraisPersonnel: 0, impotsTaxes: 1100000, fraisFinanciers: 700000, dotationsAmortissements: 0 },
-  { year: 7, extractionGranite: 5500, caGranite: 0, extractionTuf: 0, caTuf: 0, matieresFournitures: 9500000, services: 4600000, fraisPersonnel: 0, impotsTaxes: 1150000, fraisFinanciers: 600000, dotationsAmortissements: 0 },
-  { year: 8, extractionGranite: 5500, caGranite: 0, extractionTuf: 0, caTuf: 0, matieresFournitures: 9700000, services: 4700000, fraisPersonnel: 0, impotsTaxes: 1200000, fraisFinanciers: 500000, dotationsAmortissements: 0 },
-  { year: 9, extractionGranite: 5500, caGranite: 0, extractionTuf: 0, caTuf: 0, matieresFournitures: 9900000, services: 4800000, fraisPersonnel: 0, impotsTaxes: 1250000, fraisFinanciers: 400000, dotationsAmortissements: 0 },
-  { year: 10, extractionGranite: 5500, caGranite: 0, extractionTuf: 0, caTuf: 0, matieresFournitures: 10100000, services: 4900000, fraisPersonnel: 0, impotsTaxes: 1300000, fraisFinanciers: 300000, dotationsAmortissements: 0 }
-];
+// Firebase Imports
+import { 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  signOut, 
+  onAuthStateChanged,
+  User as FirebaseUser
+} from "firebase/auth";
+import { 
+  collection, 
+  doc, 
+  getDocs, 
+  getDocFromServer, 
+  setDoc, 
+  deleteDoc, 
+  query, 
+  where, 
+  orderBy 
+} from "firebase/firestore";
+import { db, auth, OperationType, handleFirestoreError } from "./lib/firebase";
 
-const INITIAL_YEARS_TUF: AnnualData[] = [
-  { year: 1, extractionGranite: 0, caGranite: 0, extractionTuf: 45000, caTuf: 0, matieresFournitures: 8000000, services: 4000000, fraisPersonnel: 0, impotsTaxes: 850000, fraisFinanciers: 1200000, dotationsAmortissements: 0 },
-  { year: 2, extractionGranite: 0, caGranite: 0, extractionTuf: 48000, caTuf: 0, matieresFournitures: 8200000, services: 4100000, fraisPersonnel: 0, impotsTaxes: 900000, fraisFinanciers: 1100000, dotationsAmortissements: 0 },
-  { year: 3, extractionGranite: 0, caGranite: 0, extractionTuf: 50000, caTuf: 0, matieresFournitures: 8500000, services: 4200000, fraisPersonnel: 0, impotsTaxes: 950000, fraisFinanciers: 1000000, dotationsAmortissements: 0 },
-  { year: 4, extractionGranite: 0, caGranite: 0, extractionTuf: 52000, caTuf: 0, matieresFournitures: 8800000, services: 4300000, fraisPersonnel: 0, impotsTaxes: 1000000, fraisFinanciers: 900000, dotationsAmortissements: 0 },
-  { year: 5, extractionGranite: 0, caGranite: 0, extractionTuf: 55000, caTuf: 0, matieresFournitures: 9100000, services: 4400000, fraisPersonnel: 0, impotsTaxes: 1050000, fraisFinanciers: 800000, dotationsAmortissements: 0 },
-  { year: 6, extractionGranite: 0, caGranite: 0, extractionTuf: 55000, caTuf: 0, matieresFournitures: 9300000, services: 4500000, fraisPersonnel: 0, impotsTaxes: 1100000, fraisFinanciers: 700000, dotationsAmortissements: 0 },
-  { year: 7, extractionGranite: 0, caGranite: 0, extractionTuf: 55000, caTuf: 0, matieresFournitures: 9500000, services: 4600000, fraisPersonnel: 0, impotsTaxes: 1150000, fraisFinanciers: 600000, dotationsAmortissements: 0 },
-  { year: 8, extractionGranite: 0, caGranite: 0, extractionTuf: 55000, caTuf: 0, matieresFournitures: 9700000, services: 4700000, fraisPersonnel: 0, impotsTaxes: 1200000, fraisFinanciers: 500000, dotationsAmortissements: 0 },
-  { year: 9, extractionGranite: 0, caGranite: 0, extractionTuf: 55000, caTuf: 0, matieresFournitures: 9900000, services: 4800000, fraisPersonnel: 0, impotsTaxes: 1250000, fraisFinanciers: 400000, dotationsAmortissements: 0 },
-  { year: 10, extractionGranite: 0, caGranite: 0, extractionTuf: 55000, caTuf: 0, matieresFournitures: 10100000, services: 4900000, fraisPersonnel: 0, impotsTaxes: 1300000, fraisFinanciers: 300000, dotationsAmortissements: 0 }
-];
 
-const INITIAL_YEARS: AnnualData[] = INITIAL_YEARS_GRANITE;
-
-const INITIAL_ROLES: EmployeeRole[] = [
-  { id: "1", designation: "Directeur d'exploitation", count: 1, monthlySalary: 120000, hasExperience: true, allocation: "Common" },
-  { id: "2", designation: "Ingénieur des Mines", count: 1, monthlySalary: 95000, hasExperience: true, allocation: "Common" },
-  { id: "3", designation: "Chef d'équipe de carrière", count: 2, monthlySalary: 75000, hasExperience: true, allocation: "Common" },
-  { id: "4", designation: "Conducteur d'engins qualifié", count: 6, monthlySalary: 60000, hasExperience: false, allocation: "Common" },
-  { id: "5", designation: "Scieur au fil diamanté", count: 3, monthlySalary: 55000, hasExperience: false, allocation: "Granite" },
-  { id: "6", designation: "Foreur sur foreuse", count: 2, monthlySalary: 55000, hasExperience: false, allocation: "Common" },
-  { id: "7", designation: "Mécanicien de maintenance", count: 1, monthlySalary: 65000, hasExperience: true, allocation: "Common" },
-  { id: "8", designation: "Agent d'entretien et divers", count: 2, monthlySalary: 42000, hasExperience: false, allocation: "Common" },
-  { id: "9", designation: "Secrétaire/Comptable", count: 1, monthlySalary: 50000, hasExperience: true, allocation: "Common" },
-  { id: "10", designation: "Gardien/Sécurité", count: 3, monthlySalary: 45000, hasExperience: false, allocation: "Common" }
-];
-
-const INITIAL_MACHINES: OperationalMachine[] = [
-  { id: "m1", designation: "Excavateur principal CAT 336", count: 1, powerKw: 220, consumptionRate: 0.15, utilizationCoef: 0.7, hoursPerDay: 8, workDaysPerYear: 250, allocation: "Common" },
-  { id: "m2", designation: "Chargeuse sur pneus Komatsu WA470", count: 1, powerKw: 200, consumptionRate: 0.15, utilizationCoef: 0.6, hoursPerDay: 8, workDaysPerYear: 250, allocation: "Common" },
-  { id: "m3", designation: "Foreuse Hydraulique fond de trou", count: 1, powerKw: 110, consumptionRate: 0.14, utilizationCoef: 0.7, hoursPerDay: 6, workDaysPerYear: 200, allocation: "Granite" },
-  { id: "m4", designation: "Camion dumper articulé Volvo A30", count: 2, powerKw: 260, consumptionRate: 0.16, utilizationCoef: 0.5, hoursPerDay: 8, workDaysPerYear: 250, allocation: "Common" }
-];
-
-const INITIAL_ELECTRICITY_LINES: ElectricityLine[] = [
-  { id: "e1", designation: "Unité de concassage / Criblage Tuf", count: 1, powerKw: 132, utilizationCoef: 0.75, hoursPerDay: 8, workDaysPerYear: 250 },
-  { id: "e2", designation: "Châssis de Sciage Granite", count: 1, powerKw: 75, utilizationCoef: 0.7, hoursPerDay: 16, workDaysPerYear: 250 },
-  { id: "e3", designation: "Ateliers, compresseurs et bureaux", count: 1, powerKw: 30, utilizationCoef: 0.5, hoursPerDay: 8, workDaysPerYear: 250 }
-];
-
-const INITIAL_ACCESSORY_ITEMS: AccessoryItem[] = [
-  { id: "a1", designation: "Fil diamanté sciage", qtyPerYear: 120, unitPrice: 35000, unit: "m", allocation: "Granite" },
-  { id: "a2", designation: "Fleurets et taillants foreuse", qtyPerYear: 60, unitPrice: 8500, unit: "u", allocation: "Granite" },
-  { id: "a3", designation: "Lubrifiants et graisses machine", qtyPerYear: 800, unitPrice: 450, unit: "L", allocation: "Common" }
-];
-
-const INITIAL_EQUIPMENTS: Equipment[] = [
-  { id: "eq1", designation: "Excavateur CAT 336", category: "Équipements Lourds & Matériel", price: 25000000, duration: 10, allocation: "Common" },
-  { id: "eq2", designation: "Chargeuse Komatsu WA470", category: "Équipements Lourds & Matériel", price: 18000000, duration: 8, allocation: "Common" },
-  { id: "eq3", designation: "Foreuse Hydraulique", category: "Équipements Lourds & Matériel", price: 12000000, duration: 5, allocation: "Granite" },
-  { id: "eq4", designation: "Châssis Monolame", category: "Équipements Lourds & Matériel", price: 8000000, duration: 5, allocation: "Granite" },
-  { id: "eq5", designation: "Concasseur mobile", category: "Équipements Lourds & Matériel", price: 15000000, duration: 7, allocation: "Tuf" },
-  { id: "eq6", designation: "Camions dumpers Volvo (x2)", category: "Équipements Lourds & Matériel", price: 24000000, duration: 8, allocation: "Common" }
-];
-
-const INITIAL_WATER_CONFIG_WITH_ITEMS: WaterConfig = {
-  globalPrice: 40.95,
-  hasCustomPrices: false,
-  customPrices: Array(10).fill(40.95),
-  items: [
-    { id: "w1", designation: "Refroidissement fil diamanté (Sciage)", flowRate: 4000, hoursPerShift: 8, shiftsPerDay: 2, daysPerYear: 250, hoursPerYear: 4000, hasCustomHours: false, customHours: Array(10).fill(0) },
-    { id: "w2", designation: "Dépoussiérage pistes et concassage", flowRate: 1500, hoursPerShift: 4, shiftsPerDay: 1, daysPerYear: 200, hoursPerYear: 800, hasCustomHours: false, customHours: Array(10).fill(0) },
-    { id: "w3", designation: "Lavage engins et divers services", flowRate: 800, hoursPerShift: 2, shiftsPerDay: 1, daysPerYear: 250, hoursPerYear: 500, hasCustomHours: false, customHours: Array(10).fill(0) }
-  ]
-};
-
-const INITIAL_WATER_CONFIG: WaterConfig = INITIAL_WATER_CONFIG_WITH_ITEMS;
+const INITIAL_YEARS: AnnualData[] = Array.from({ length: 10 }, (_, i) => ({
+  year: i + 1,
+  extractionGranite: 0,
+  caGranite: 0,
+  extractionTuf: 0,
+  caTuf: 0,
+  matieresFournitures: 0,
+  services: 0,
+  fraisPersonnel: 0,
+  impotsTaxes: 0,
+  fraisFinanciers: 0,
+  dotationsAmortissements: 0,
+}));
 
 const formatCurrency = (n: number) => {
   if (n === undefined || n === null || isNaN(n)) return '0';
@@ -185,6 +143,15 @@ const formatCompact = (n: number) => {
   } catch (e) {
     return '0';
   }
+};
+
+const INITIAL_EQUIPMENTS: Equipment[] = [];
+
+const INITIAL_WATER_CONFIG: WaterConfig = {
+  globalPrice: 40.95,
+  hasCustomPrices: false,
+  customPrices: Array(10).fill(40.95),
+  items: []
 };
 
 const INITIAL_PROD_CONFIG: ProductionDimensioning = {
@@ -257,95 +224,21 @@ function useLocalStorage<T>(key: string, initialValue: T) {
   return [storedValue, setValue] as const;
 }
 
-const PRELOADED_GRANITE = {
-  saveName: "TCR GRANITE",
-  userNotes: "",
-  years: INITIAL_YEARS_GRANITE,
-  equipments: INITIAL_EQUIPMENTS,
-  roles: INITIAL_ROLES,
-  hrConfig: { socialChargesRate: 0.26, annualIncreaseRate: 0.03, paidMonths: 12, experienceRate: 0.06 },
-  machines: INITIAL_MACHINES,
-  opConfig: { fuelPrice: 29, workDaysPerYear: 250, hoursPerDay: 8, annualInflationRate: 3 },
-  electricityLines: INITIAL_ELECTRICITY_LINES,
-  electricityConfig: { cosPhi: 0.8, kvaPerGroup: 500, specificConsumption: 0.30, workDaysPerYear: 250, hoursPerDay: 8 },
-  accessoryConfig: { items: INITIAL_ACCESSORY_ITEMS },
-  waterConfig: INITIAL_WATER_CONFIG_WITH_ITEMS,
-  ibmRate: 0.12,
-  priceGranite: 4500,
-  densityGranite: 2.49,
-  priceTuf: 3500,
-  densityTuf: 2.39,
-  decimalPlaces: 2,
-  dmParams: { vs: '20', cfu: '0.5', hj: '8', ja: '250', n: '1' },
-  productionConfig: INITIAL_PROD_CONFIG,
-  lastSaved: "2026-06-03T00:00:00.000Z"
-};
-
-const PRELOADED_TUF = {
-  saveName: "TCR TUF",
-  userNotes: "",
-  years: INITIAL_YEARS_TUF,
-  equipments: INITIAL_EQUIPMENTS,
-  roles: INITIAL_ROLES,
-  hrConfig: { socialChargesRate: 0.26, annualIncreaseRate: 0.03, paidMonths: 12, experienceRate: 0.06 },
-  machines: INITIAL_MACHINES,
-  opConfig: { fuelPrice: 29, workDaysPerYear: 250, hoursPerDay: 8, annualInflationRate: 3 },
-  electricityLines: INITIAL_ELECTRICITY_LINES,
-  electricityConfig: { cosPhi: 0.8, kvaPerGroup: 500, specificConsumption: 0.30, workDaysPerYear: 250, hoursPerDay: 8 },
-  accessoryConfig: { items: INITIAL_ACCESSORY_ITEMS },
-  waterConfig: INITIAL_WATER_CONFIG_WITH_ITEMS,
-  ibmRate: 0.12,
-  priceGranite: 4500,
-  densityGranite: 2.49,
-  priceTuf: 3500,
-  densityTuf: 2.39,
-  decimalPlaces: 2,
-  dmParams: { vs: '20', cfu: '0.5', hj: '8', ja: '250', n: '1' },
-  productionConfig: INITIAL_PROD_CONFIG,
-  lastSaved: "2026-06-03T00:00:01.000Z"
-};
-
 export default function App() {
-  const STUDY_KEY_GRANITE = 'tcr:study:granite';
-  const STUDY_KEY_TUF = 'tcr:study:tuf';
-  const HISTORY_KEY_GRANITE = 'tcr:history:granite';
-  const HISTORY_KEY_TUF = 'tcr:history:tuf';
-  const ACTIVE_STUDY_ID_KEY = 'tcr:active_study_id';
+  const SAVE_KEY = 'graniteapp_saved_state_v1';
 
-  const [studyId, setStudyIdState] = useState<'granite' | 'tuf'>(() => {
-    const saved = localStorage.getItem(ACTIVE_STUDY_ID_KEY);
-    if (saved === 'tuf' || saved === 'granite') {
-      return saved as 'granite' | 'tuf';
-    }
-    return 'granite';
-  });
-
-  const SAVE_KEY = studyId === 'granite' ? STUDY_KEY_GRANITE : STUDY_KEY_TUF;
-
-  // Helper to load initial state from localStorage for the active study
-  const loadInitialState = (id: 'granite' | 'tuf') => {
+  // Helper to load initial state from localStorage
+  const loadInitialState = () => {
     try {
-      const key = id === 'granite' ? STUDY_KEY_GRANITE : STUDY_KEY_TUF;
-      const saved = window.localStorage.getItem(key);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (
-          parsed &&
-          parsed.equipments &&
-          parsed.equipments.length > 0 &&
-          parsed.years &&
-          !parsed.years.every((y: any) => (y.extractionGranite || 0) === 0 && (y.extractionTuf || 0) === 0)
-        ) {
-          return parsed;
-        }
-      }
+      const saved = window.localStorage.getItem(SAVE_KEY);
+      if (saved) return JSON.parse(saved);
     } catch (e) {
       console.error("Erreur lors du chargement de la sauvegarde :", e);
     }
-    return id === 'granite' ? PRELOADED_GRANITE : PRELOADED_TUF;
+    return null;
   };
 
-  const initialState = loadInitialState(studyId);
+  const initialState = loadInitialState();
 
   const [theme, setTheme] = useLocalStorage<'light' | 'dark'>('theme', 'light');
 
@@ -361,7 +254,7 @@ export default function App() {
 
   const [userNotes, setUserNotes] = useState<string>(initialState?.userNotes ?? '');
   const [activeTab, setActiveTab] = useState<'dashboard' | 'prod' | 'edit' | 'table' | 'invest' | 'hr' | 'ops' | 'elec' | 'acc' | 'charts' | 'code' | 'about' | 'help' | 'history'>('dashboard');
-  const [years, setYears] = useState<AnnualData[]>(initialState?.years ?? (studyId === 'granite' ? INITIAL_YEARS_GRANITE : INITIAL_YEARS_TUF));
+  const [years, setYears] = useState<AnnualData[]>(initialState?.years ?? INITIAL_YEARS);
   const [equipments, setEquipments] = useState<Equipment[]>(initialState?.equipments ?? INITIAL_EQUIPMENTS);
   const [ibmRate, setIbmRate] = useState<number>(initialState?.ibmRate ?? 0.12);
   const [ibmRateInput, setIbmRateInput] = useState<string>(((initialState?.ibmRate ?? 0.12) * 100).toString());
@@ -381,7 +274,7 @@ export default function App() {
   const [decimalPlacesInput, setDecimalPlacesInput] = useState<string>((initialState?.decimalPlaces ?? 2).toString());
 
   // HR State
-  const [roles, setRoles] = useState<EmployeeRole[]>(initialState?.roles ?? INITIAL_ROLES);
+  const [roles, setRoles] = useState<EmployeeRole[]>(initialState?.roles ?? []);
   const [hrConfig, setHrConfig] = useState<HRConfig>(() => {
     const base = initialState?.hrConfig ?? {
       socialChargesRate: 0.26,
@@ -401,7 +294,7 @@ export default function App() {
 
   // Operational State
   const [machines, setMachines] = useState<OperationalMachine[]>(() => {
-    const base = initialState?.machines ?? INITIAL_MACHINES;
+    const base = initialState?.machines ?? [];
     return base.map((m: any) => ({
       ...m,
       hoursPerDay: m.hoursPerDay ?? initialState?.opConfig?.hoursPerDay ?? 8,
@@ -418,7 +311,7 @@ export default function App() {
 
   // Electricity State
   const [electricityLines, setElectricityLines] = useState<ElectricityLine[]>(() => {
-    const base = initialState?.electricityLines ?? INITIAL_ELECTRICITY_LINES;
+    const base = initialState?.electricityLines ?? [];
     return base.map((l: any) => ({
       ...l,
       hoursPerDay: l.hoursPerDay ?? initialState?.electricityConfig?.hoursPerDay ?? 8,
@@ -447,7 +340,7 @@ export default function App() {
   const [accessoryConfig, setAccessoryConfig] = useState<AccessoryConfig>(() => {
     const base = initialState?.accessoryConfig;
     return {
-      items: base?.items || INITIAL_ACCESSORY_ITEMS
+      items: base?.items || []
     };
   });
 
@@ -517,7 +410,7 @@ export default function App() {
       ...INITIAL_WATER_CONFIG,
       ...base,
       customPrices: base.customPrices ?? Array(10).fill(base.globalPrice ?? 40.95),
-      items: base.items || INITIAL_WATER_CONFIG.items
+      items: base.items || []
     };
   });
 
@@ -543,44 +436,10 @@ export default function App() {
   const [dmN, setDmN] = useState(initialState?.dmParams?.n ?? '1');
 
   const [isSettingsExpanded, setIsSettingsExpanded] = useState(false);
-  const getHistoryKey = (id: 'granite' | 'tuf') => id === 'granite' ? HISTORY_KEY_GRANITE : HISTORY_KEY_TUF;
-  const getHistoryDefault = (id: 'granite' | 'tuf') => id === 'granite' ? [PRELOADED_GRANITE] : [PRELOADED_TUF];
-
-  const [history, setHistoryState] = useState<any[]>([]);
-
-  useEffect(() => {
-    const key = getHistoryKey(studyId);
-    const saved = localStorage.getItem(key);
-    if (saved) {
-      try {
-        setHistoryState(JSON.parse(saved));
-      } catch (e) {
-        setHistoryState(getHistoryDefault(studyId));
-      }
-    } else {
-      setHistoryState(getHistoryDefault(studyId));
-    }
-  }, [studyId]);
-
-  const setHistory = (val: any[] | ((prev: any[]) => any[])) => {
-    setHistoryState(prev => {
-      const newVal = typeof val === 'function' ? val(prev) : val;
-      localStorage.setItem(getHistoryKey(studyId), JSON.stringify(newVal));
-      return newVal;
-    });
-  };
-
-  const [customSaveName, setCustomSaveName] = useState<string>(studyId === 'granite' ? "TCR GRANITE" : "TCR TUF");
+  const [history, setHistory] = useLocalStorage<any[]>('graniteapp_history_v1', []);
+  const [customSaveName, setCustomSaveName] = useState<string>("TCR GRANITE");
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
-  const [resetSaveName, setResetSaveName] = useState(studyId === 'granite' ? "TCR GRANITE" : "TCR TUF");
-
-  useEffect(() => {
-    setCustomSaveName(studyId === 'granite' ? "TCR GRANITE" : "TCR TUF");
-    setResetSaveName(studyId === 'granite' ? "TCR GRANITE" : "TCR TUF");
-  }, [studyId]);
-
-  const [deleteTargetIndex, setDeleteTargetIndex] = useState<number | null>(null);
-  const [isClearHistoryOpen, setIsClearHistoryOpen] = useState(false);
+  const [resetSaveName, setResetSaveName] = useState("TCR GRANITE");
   const [toast, setToast] = useState<{message: string, type: 'success' | 'info' | 'error'} | null>(null);
 
   const showToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
@@ -590,141 +449,242 @@ export default function App() {
     return () => clearTimeout(timer);
   };
 
-  // Safe object generation capturing current React state perfectly
-  const getCurrentStateObject = (customName?: string) => {
-    return {
-      saveName: customName || (studyId === 'granite' ? "TCR GRANITE" : "TCR TUF"),
-      userNotes,
-      years,
-      equipments,
-      roles,
-      hrConfig,
-      machines,
-      opConfig,
-      electricityLines,
-      electricityConfig,
-      accessoryConfig,
-      waterConfig,
-      ibmRate,
-      priceGranite,
-      densityGranite,
-      priceTuf,
-      densityTuf,
-      decimalPlaces,
-      dmParams: { vs: dmVs, cfu: dmCfu, hj: dmHj, ja: dmJa, n: dmN },
-      productionConfig,
-      lastSaved: new Date().toISOString()
-    };
-  };
+  // Firebase auth & cloud studies state
+  const [fbUser, setFbUser] = useState<FirebaseUser | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [cloudStudies, setCloudStudies] = useState<any[]>([]);
+  const [isCloudLoading, setIsCloudLoading] = useState(false);
 
-  const applyStateObject = (data: any) => {
-    if (!data) return;
-    setUserNotes(data.userNotes ?? '');
-    setYears(data.years ?? (studyId === 'granite' ? INITIAL_YEARS_GRANITE : INITIAL_YEARS_TUF));
-    setEquipments(data.equipments ?? INITIAL_EQUIPMENTS);
-    setRoles(data.roles && data.roles.length > 0 ? data.roles : INITIAL_ROLES);
-    setHrConfig(data.hrConfig ?? { socialChargesRate: 0.26, annualIncreaseRate: 0.03, paidMonths: 12, experienceRate: 0.06 });
-    setSocialChargesInput(((data.hrConfig?.socialChargesRate ?? 0.26) * 100).toString());
-    setAnnualIncreaseInput(((data.hrConfig?.annualIncreaseRate ?? 0.03) * 100).toString());
-    setExperienceRateInput(((data.hrConfig?.experienceRate ?? 0.06) * 100).toString());
-    setMachines(data.machines && data.machines.length > 0 ? data.machines : INITIAL_MACHINES);
-    setOpConfig(data.opConfig ?? { fuelPrice: 29, workDaysPerYear: 250, hoursPerDay: 8, annualInflationRate: 3 });
-    setAnnualInflationInput((data.opConfig?.annualInflationRate ?? 3).toString());
-    setElectricityLines(data.electricityLines && data.electricityLines.length > 0 ? data.electricityLines : INITIAL_ELECTRICITY_LINES);
-    setElectricityConfig(data.electricityConfig ?? { cosPhi: 0.8, kvaPerGroup: 500, specificConsumption: 0.30, workDaysPerYear: 250, hoursPerDay: 8 });
-    setAccessoryConfig(data.accessoryConfig ?? { items: INITIAL_ACCESSORY_ITEMS });
-    setWaterConfig(data.waterConfig ?? INITIAL_WATER_CONFIG_WITH_ITEMS);
-    setIbmRate(data.ibmRate ?? 0.12);
-    setIbmRateInput(((data.ibmRate ?? 0.12) * 100).toString());
-    setPriceGranite(data.priceGranite ?? 4500);
-    setPriceGraniteInput((data.priceGranite ?? 4500).toString());
-    setDensityGranite(data.densityGranite ?? 2.49);
-    setDensityGraniteInput((data.densityGranite ?? 2.49).toString());
-    setPriceTuf(data.priceTuf ?? 3500);
-    setPriceTufInput((data.priceTuf ?? 3500).toString());
-    setDensityTuf(data.densityTuf ?? 2.39);
-    setDensityTufInput((data.densityTuf ?? 2.39).toString());
-    setDecimalPlaces(data.decimalPlaces ?? 2);
-    setDecimalPlacesInput((data.decimalPlaces ?? 2).toString());
-    if (data.dmParams) {
-      setDmVs(data.dmParams.vs ?? '20');
-      setDmCfu(data.dmParams.cfu ?? '0.5');
-      setDmHj(data.dmParams.hj ?? '8');
-      setDmJa(data.dmParams.ja ?? '250');
-      setDmN(data.dmParams.n ?? '1');
-    }
-    if (data.productionConfig) {
-      setProductionConfig(data.productionConfig);
-    }
-  };
-
-  // Migration of legacy inputs/history to isolated scopes (purely non-destructive)
+  // Test connection to Firestore
   useEffect(() => {
-    try {
-      const legacySaved = localStorage.getItem('graniteapp_saved_state_v1');
-      if (legacySaved) {
-        const parsed = JSON.parse(legacySaved);
-        if (parsed && parsed.years) {
-          const hasGranite = parsed.years.some((y: any) => (y.extractionGranite || 0) > 0);
-          const hasTuf = parsed.years.some((y: any) => (y.extractionTuf || 0) > 0);
-          const targetKey = (hasTuf && !hasGranite) ? STUDY_KEY_TUF : STUDY_KEY_GRANITE;
-          const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-          
-          localStorage.setItem(`tcr:backup:${timestamp}`, legacySaved);
-          
-          if (!localStorage.getItem(targetKey)) {
-            localStorage.setItem(targetKey, legacySaved);
-          }
-          
-          const legacyHistory = localStorage.getItem('graniteapp_history_v1');
-          if (legacyHistory) {
-            try {
-              const histParsed = JSON.parse(legacyHistory);
-              if (Array.isArray(histParsed)) {
-                localStorage.setItem(`tcr:history_backup:${timestamp}`, legacyHistory);
-                const graniteHist = histParsed.filter((item: any) => 
-                  !item.saveName || !item.saveName.toUpperCase().includes('TUF')
-                );
-                const tufHist = histParsed.filter((item: any) => 
-                  item.saveName && item.saveName.toUpperCase().includes('TUF')
-                );
-                
-                if (graniteHist.length > 0 && !localStorage.getItem(HISTORY_KEY_GRANITE)) {
-                  localStorage.setItem(HISTORY_KEY_GRANITE, JSON.stringify(graniteHist));
-                }
-                if (tufHist.length > 0 && !localStorage.getItem(HISTORY_KEY_TUF)) {
-                  localStorage.setItem(HISTORY_KEY_TUF, JSON.stringify(tufHist));
-                }
-              }
-            } catch (err) {
-              console.error("Failed to parse history during legacy migration", err);
-            }
-          }
-          
-          const activeId = (hasTuf && !hasGranite) ? 'tuf' : 'granite';
-          setStudyIdState(activeId);
-          localStorage.setItem(ACTIVE_STUDY_ID_KEY, activeId);
-          applyStateObject(parsed);
-          
-          localStorage.removeItem('graniteapp_saved_state_v1');
-          localStorage.removeItem('graniteapp_history_v1');
-          showToast("Migration des données effectuée avec succès !");
+    async function testConnection() {
+      try {
+        await getDocFromServer(doc(db, 'test', 'connection'));
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration.");
         }
       }
-    } catch (e) {
-      console.error("Migration error:", e);
     }
+    testConnection();
   }, []);
+
+  // Fetch Cloud Saved Scenarios from Firestore
+  const fetchCloudStudies = async (uid: string) => {
+    setIsCloudLoading(true);
+    try {
+      const q = query(
+        collection(db, "studies"),
+        where("userId", "==", uid)
+      );
+      const querySnapshot = await getDocs(q);
+      const studies: any[] = [];
+      querySnapshot.forEach((docSnap) => {
+        studies.push({
+          id: docSnap.id,
+          ...docSnap.data()
+        });
+      });
+      // Sort in memory by lastSaved descending
+      studies.sort((a, b) => new Date(b.lastSaved).getTime() - new Date(a.lastSaved).getTime());
+      setCloudStudies(studies);
+    } catch (err) {
+      console.error("Error fetching cloud studies:", err);
+      showToast("Erreur lors de la récupération des sauvegardes Cloud", "error");
+    } finally {
+      setIsCloudLoading(false);
+    }
+  };
+
+  // Auth connection listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      setFbUser(u);
+      setIsAuthLoading(false);
+      if (u) {
+        fetchCloudStudies(u.uid);
+      } else {
+        setCloudStudies([]);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Sign in with Google Popup
+  const handleGoogleSignIn = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      const result = await signInWithPopup(auth, provider);
+      if (result.user) {
+        setFbUser(result.user);
+        showToast(`Bienvenue, ${result.user.displayName || "Utilisateur"} !`, "success");
+        fetchCloudStudies(result.user.uid);
+      }
+    } catch (err: any) {
+      console.error("Sign in failed:", err);
+      showToast("La connexion a échoué. Veuillez réessayer.", "error");
+    }
+  };
+
+  // Sign out
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      setFbUser(null);
+      setCloudStudies([]);
+      showToast("Déconnexion réussie.", "info");
+    } catch (err) {
+      console.error("Sign out failed:", err);
+      showToast("Erreur de déconnexion", "error");
+    }
+  };
+
+  // Save current scenario to Firestore Cloud
+  const handleSaveToCloud = async (name: string) => {
+    if (!fbUser) {
+      showToast("Veuillez vous connecter pour sauvegarder dans le cloud.", "error");
+      return;
+    }
+    const finalName = name.trim() || `TCR GRANITE - ${new Date().toLocaleDateString('fr-DZ')} ${new Date().toLocaleTimeString('fr-DZ')}`;
+    const path = "studies";
+    try {
+      const studyData = {
+        userId: fbUser.uid,
+        saveName: finalName,
+        userNotes: userNotes || '',
+        years,
+        equipments,
+        roles,
+        hrConfig,
+        machines,
+        opConfig,
+        electricityLines,
+        electricityConfig,
+        accessoryConfig,
+        waterConfig,
+        ibmRate,
+        priceGranite,
+        densityGranite,
+        priceTuf,
+        densityTuf,
+        decimalPlaces,
+        dmParams: { vs: dmVs, cfu: dmCfu, hj: dmHj, ja: dmJa, n: dmN },
+        productionConfig,
+        lastSaved: new Date().toISOString()
+      };
+
+      const newDocRef = doc(collection(db, "studies"));
+      await setDoc(newDocRef, studyData);
+      
+      showToast(`Scénario "${finalName}" enregistré dans le Cloud !`, "success");
+      fetchCloudStudies(fbUser.uid);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, path);
+    }
+  };
+
+  // Delete a cloud document
+  const handleDeleteFromCloud = async (studyId: string) => {
+    if (!fbUser) return;
+    const path = `studies/${studyId}`;
+    try {
+      await deleteDoc(doc(db, "studies", studyId));
+      showToast("Document Cloud supprimé", "success");
+      fetchCloudStudies(fbUser.uid);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, path);
+    }
+  };
+
+  // Synchronize internal localStorage history items to Firestore
+  const handleSyncLocalToCloud = async () => {
+    if (!fbUser) {
+      showToast("Connectez-vous d'abord pour synchroniser", "error");
+      return;
+    }
+    if (!Array.isArray(history) || history.length === 0) {
+      showToast("Aucun historique local à synchroniser", "info");
+      return;
+    }
+    
+    setIsCloudLoading(true);
+    let successCount = 0;
+    try {
+      for (const localSave of history) {
+        const alreadyExists = cloudStudies.some(c => c.saveName === localSave.saveName);
+        if (!alreadyExists) {
+          const studyData = {
+            userId: fbUser.uid,
+            saveName: localSave.saveName || "Sauvegarde sans nom",
+            userNotes: localSave.userNotes || '',
+            years: localSave.years || INITIAL_YEARS,
+            equipments: localSave.equipments || [],
+            roles: localSave.roles || [],
+            hrConfig: localSave.hrConfig || { socialChargesRate: 0.26, annualIncreaseRate: 0.03, paidMonths: 12 },
+            machines: localSave.machines || [],
+            opConfig: localSave.opConfig || { fuelPrice: 29, workDaysPerYear: 250, hoursPerDay: 8, annualInflationRate: 3 },
+            electricityLines: localSave.electricityLines || [],
+            electricityConfig: localSave.electricityConfig || { cosPhi: 0.8, kvaPerGroup: 500, specificConsumption: 0.30, workDaysPerYear: 250, hoursPerDay: 8 },
+            accessoryConfig: localSave.accessoryConfig || { items: [] },
+            waterConfig: localSave.waterConfig || INITIAL_WATER_CONFIG,
+            ibmRate: localSave.ibmRate ?? 0.12,
+            priceGranite: localSave.priceGranite ?? 4500,
+            densityGranite: localSave.densityGranite ?? 2.49,
+            priceTuf: localSave.priceTuf ?? 3500,
+            densityTuf: localSave.densityTuf ?? 2.39,
+            decimalPlaces: localSave.decimalPlaces ?? 2,
+            dmParams: localSave.dmParams || { vs: dmVs, cfu: dmCfu, hj: dmHj, ja: dmJa, n: dmN },
+            productionConfig: localSave.productionConfig || INITIAL_PROD_CONFIG,
+            lastSaved: localSave.lastSaved || new Date().toISOString()
+          };
+          const newDocRef = doc(collection(db, "studies"));
+          await setDoc(newDocRef, studyData);
+          successCount++;
+        }
+      }
+      showToast(`${successCount} sauvegardes locales synchronisées avec le Cloud !`, "success");
+      fetchCloudStudies(fbUser.uid);
+    } catch (err) {
+      console.error("Local-to-cloud sync failure:", err);
+      showToast("Une erreur est survenue lors de la synchronisation", "error");
+    } finally {
+      setIsCloudLoading(false);
+    }
+  };
 
   const handleSave = (customName?: string) => {
     try {
-      const stateToSave = getCurrentStateObject(customName);
+      const stateToSave = {
+        saveName: customName,
+        userNotes,
+        years,
+        equipments,
+        roles,
+        hrConfig,
+        machines,
+        opConfig,
+        electricityLines,
+        electricityConfig,
+        accessoryConfig,
+        waterConfig,
+        ibmRate,
+        priceGranite,
+        densityGranite,
+        priceTuf,
+        densityTuf,
+        decimalPlaces,
+        dmParams: { vs: dmVs, cfu: dmCfu, hj: dmHj, ja: dmJa, n: dmN },
+        productionConfig,
+        lastSaved: new Date().toISOString()
+      };
       window.localStorage.setItem(SAVE_KEY, JSON.stringify(stateToSave));
       
+      // Add to history safely
       setHistory(prev => {
         const currentHistory = Array.isArray(prev) ? prev : [];
         const newHistory = [stateToSave, ...currentHistory];
-        return newHistory.slice(0, 50);
+        return newHistory.slice(0, 50); // Keep last 50
       });
       
       if (customName) {
@@ -738,41 +698,60 @@ export default function App() {
     }
   };
 
-  const switchStudy = (newStudyId: 'granite' | 'tuf') => {
-    if (newStudyId === studyId) return;
-    
-    // Save current state of the current studyId to its specific key before switching
-    const currentData = getCurrentStateObject();
-    localStorage.setItem(SAVE_KEY, JSON.stringify(currentData));
-    
-    // Set the active study ID in state & localStorage
-    setStudyIdState(newStudyId);
-    localStorage.setItem(ACTIVE_STUDY_ID_KEY, newStudyId);
-    
-    // Load the new study state from its specific key
-    const targetKey = newStudyId === 'granite' ? STUDY_KEY_GRANITE : STUDY_KEY_TUF;
-    const targetSaved = localStorage.getItem(targetKey);
-    
-    if (targetSaved) {
-      try {
-        const parsed = JSON.parse(targetSaved);
-        applyStateObject(parsed);
-      } catch (e) {
-        console.error("Error loading study state:", e);
-        applyStateObject(newStudyId === 'granite' ? PRELOADED_GRANITE : PRELOADED_TUF);
-      }
-    } else {
-      applyStateObject(newStudyId === 'granite' ? PRELOADED_GRANITE : PRELOADED_TUF);
+  useEffect(() => {
+    const hasTcrGranite = Array.isArray(history) && history.some((item: any) => item.saveName === "TCR GRANITE");
+    if (!hasTcrGranite) {
+      const timer = setTimeout(() => {
+        handleSave("TCR GRANITE");
+      }, 500);
+      return () => clearTimeout(timer);
     }
-    
-    showToast(`Bascule vers l'étude ${newStudyId === 'granite' ? 'Granit' : 'Tuf'} réussie !`);
-  };
+  }, []);
 
   const restoreFromHistory = (data: any) => {
     if (!data) return;
     try {
+      // 1. Instantly write to SAVE_KEY so it's persisted on refresh / reload
       window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-      applyStateObject(data);
+
+      // 2. Safely apply to React state variables
+      setUserNotes(data.userNotes ?? '');
+      setYears(data.years ?? INITIAL_YEARS);
+      setEquipments(data.equipments ?? INITIAL_EQUIPMENTS);
+      setRoles(data.roles ?? []);
+      setHrConfig(data.hrConfig ?? { socialChargesRate: 0.26, annualIncreaseRate: 0.03, paidMonths: 12 });
+      setSocialChargesInput(((data.hrConfig?.socialChargesRate ?? 0.26) * 100).toString());
+      setAnnualIncreaseInput(((data.hrConfig?.annualIncreaseRate ?? 0.03) * 100).toString());
+      setExperienceRateInput(((data.hrConfig?.experienceRate ?? 0.06) * 100).toString());
+      setMachines(data.machines ?? []);
+      setOpConfig(data.opConfig ?? { fuelPrice: 29, workDaysPerYear: 250, hoursPerDay: 8, annualInflationRate: 3 });
+      setAnnualInflationInput((data.opConfig?.annualInflationRate ?? 3).toString());
+      setElectricityLines(data.electricityLines ?? []);
+      setElectricityConfig(data.electricityConfig ?? { cosPhi: 0.8, kvaPerGroup: 500, specificConsumption: 0.30, workDaysPerYear: 250, hoursPerDay: 8 });
+      setAccessoryConfig(data.accessoryConfig ?? { items: [] });
+      setWaterConfig(data.waterConfig ?? INITIAL_WATER_CONFIG);
+      setIbmRate(data.ibmRate ?? 0.12);
+      setIbmRateInput(((data.ibmRate ?? 0.12) * 100).toString());
+      setPriceGranite(data.priceGranite ?? 4500);
+      setPriceGraniteInput((data.priceGranite ?? 4500).toString());
+      setDensityGranite(data.densityGranite ?? 2.49);
+      setDensityGraniteInput((data.densityGranite ?? 2.49).toString());
+      setPriceTuf(data.priceTuf ?? 3500);
+      setPriceTufInput((data.priceTuf ?? 3500).toString());
+      setDensityTuf(data.densityTuf ?? 2.39);
+      setDensityTufInput((data.densityTuf ?? 2.39).toString());
+      setDecimalPlaces(data.decimalPlaces ?? 2);
+      setDecimalPlacesInput((data.decimalPlaces ?? 2).toString());
+      if (data.dmParams) {
+        setDmVs(data.dmParams.vs ?? '20');
+        setDmCfu(data.dmParams.cfu ?? '0.5');
+        setDmHj(data.dmParams.hj ?? '8');
+        setDmJa(data.dmParams.ja ?? '250');
+        setDmN(data.dmParams.n ?? '1');
+      }
+      if (data.productionConfig) {
+        setProductionConfig(data.productionConfig);
+      }
       showToast("Version restaurée avec succès et sauvegardée");
       setActiveTab('dashboard');
     } catch (err) {
@@ -783,20 +762,20 @@ export default function App() {
 
   const resetToInitial = useCallback(() => {
     setUserNotes('');
-    setYears(studyId === 'granite' ? INITIAL_YEARS_GRANITE : INITIAL_YEARS_TUF);
+    setYears(INITIAL_YEARS);
     setEquipments(INITIAL_EQUIPMENTS);
-    setRoles(INITIAL_ROLES);
-    setHrConfig({ socialChargesRate: 0.26, annualIncreaseRate: 0.03, paidMonths: 12, experienceRate: 0.06 });
+    setRoles([]);
+    setHrConfig({ socialChargesRate: 0.26, annualIncreaseRate: 0.03, paidMonths: 12 });
     setSocialChargesInput("26");
     setAnnualIncreaseInput("3");
     setExperienceRateInput("6");
-    setMachines(INITIAL_MACHINES);
+    setMachines([]);
     setOpConfig({ fuelPrice: 29, workDaysPerYear: 250, hoursPerDay: 8, annualInflationRate: 3 });
     setAnnualInflationInput("3");
-    setElectricityLines(INITIAL_ELECTRICITY_LINES);
+    setElectricityLines([]);
     setElectricityConfig({ cosPhi: 0.8, kvaPerGroup: 500, specificConsumption: 0.30, workDaysPerYear: 250, hoursPerDay: 8 });
-    setAccessoryConfig({ items: INITIAL_ACCESSORY_ITEMS });
-    setWaterConfig(INITIAL_WATER_CONFIG_WITH_ITEMS);
+    setAccessoryConfig({ items: [] });
+    setWaterConfig(INITIAL_WATER_CONFIG);
     setIbmRate(0.12);
     setIbmRateInput("12");
     setPriceGranite(4500);
@@ -809,31 +788,63 @@ export default function App() {
     setDensityTufInput("2.39");
     setDecimalPlaces(2);
     setDecimalPlacesInput("2");
-    setDmVs('20');
-    setDmCfu('0.5');
+    setDmVs('1.5');
+    setDmCfu('1');
     setDmHj('8');
     setDmJa('250');
     setDmN('1');
     setProductionConfig(INITIAL_PROD_CONFIG);
     setActiveTab('dashboard');
-  }, [studyId]);
+  }, []);
 
   const handleConfirmReset = useCallback((saveName: string) => {
     try {
-      const finalName = saveName.trim() || (studyId === 'granite' ? 'TCR GRANITE - Sauvegarde Automatique' : 'TCR TUF - Sauvegarde Automatique');
-      const stateToSave = getCurrentStateObject(finalName);
+      const finalName = saveName.trim() || `TCR GRANITE - Sauvegarde Automatique`;
       
-      // Save current state first to scoped key
+      const stateToSave = {
+        saveName: finalName,
+        userNotes,
+        years,
+        equipments,
+        roles,
+        hrConfig,
+        machines,
+        opConfig,
+        electricityLines,
+        electricityConfig,
+        accessoryConfig,
+        ibmRate,
+        priceGranite,
+        densityGranite,
+        priceTuf,
+        densityTuf,
+        decimalPlaces,
+        dmParams: { vs: dmVs, cfu: dmCfu, hj: dmHj, ja: dmJa, n: dmN },
+        productionConfig,
+        lastSaved: new Date().toISOString()
+      };
+      
+      // Save current state first (ensuring persistence)
       window.localStorage.setItem(SAVE_KEY, JSON.stringify(stateToSave));
       
-      // Update history in state & localStorage
+      // Update history in state & localStorage (guaranteeing the user's priority)
       const currentHistory = Array.isArray(history) ? history : [];
       const updatedHistory = [stateToSave, ...currentHistory].slice(0, 50);
+      window.localStorage.setItem('graniteapp_history_v1', JSON.stringify(updatedHistory));
       setHistory(updatedHistory);
 
-      // We remove the active state from localStorage to trigger natural default reloading
+      // Now prepare to reset all entries except history itself
+      const keys = Object.keys(window.localStorage);
+      const toRemove = keys.filter(k => 
+        (k.startsWith('granite_') || k.startsWith('graniteapp_')) && 
+        k !== 'graniteapp_history_v1' && 
+        k !== 'theme'
+      );
+      
+      // Remove all state data
       window.localStorage.removeItem(SAVE_KEY);
-
+      toRemove.forEach(k => window.localStorage.removeItem(k));
+      
       // Revert memory state
       resetToInitial();
       
@@ -855,7 +866,7 @@ export default function App() {
       showToast("Une erreur est survenue lors de la réinitialisation.", "error");
     }
   }, [
-    studyId, history, resetToInitial, userNotes, years, equipments, roles, hrConfig, 
+    history, setHistory, resetToInitial, userNotes, years, equipments, roles, hrConfig, 
     machines, opConfig, electricityLines, electricityConfig, accessoryConfig, waterConfig, 
     ibmRate, priceGranite, densityGranite, priceTuf, densityTuf, decimalPlaces, 
     dmVs, dmCfu, dmHj, dmJa, dmN, productionConfig
@@ -2010,7 +2021,7 @@ export default function App() {
     <div className="flex h-screen bg-sleek-bg overflow-hidden font-sans antialiased text-sleek-text-main">
       {/* Sidebar - Sleek Theme */}
       <aside className="w-72 bg-sleek-sidebar text-white flex flex-col shrink-0 overflow-y-auto custom-scrollbar shadow-modern-xl z-50">
-        <div className="p-8 pb-4 flex items-center gap-3">
+        <div className="p-8 pb-6 flex items-center gap-3">
           <motion.div 
             whileHover={{ rotate: 10, scale: 1.1 }}
             className="w-12 h-12 bg-sleek-primary rounded-2xl flex items-center justify-center shadow-lg shadow-sleek-primary/30 border border-white/10"
@@ -2020,32 +2031,6 @@ export default function App() {
           <div className="flex flex-col">
             <span className="text-2xl font-black tracking-[0.1em] leading-none text-white">TCR</span>
             <span className="text-[9px] font-bold uppercase tracking-[3px] opacity-40 leading-none mt-1">Mining Analytics</span>
-          </div>
-        </div>
-
-        {/* Dynamic Study Switcher */}
-        <div className="px-6 mb-4">
-          <div className="bg-white/5 rounded-2xl p-1 border border-white/5 flex relative z-[100] outline-none">
-            <button 
-              onClick={() => switchStudy('granite')}
-              className={`flex-1 py-2.5 rounded-xl text-[10px] uppercase tracking-wider text-center transition-all cursor-pointer border-none bg-transparent outline-none ${
-                studyId === 'granite' 
-                  ? "bg-sleek-primary text-white shadow-lg shadow-sleek-primary/25 font-black" 
-                  : "text-white/40 hover:text-white/85 font-bold"
-              }`}
-            >
-              Granite
-            </button>
-            <button 
-              onClick={() => switchStudy('tuf')}
-              className={`flex-1 py-2.5 rounded-xl text-[10px] uppercase tracking-wider text-center transition-all cursor-pointer border-none bg-transparent outline-none ${
-                studyId === 'tuf' 
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/25 font-black" 
-                  : "text-white/40 hover:text-white/85 font-bold"
-              }`}
-            >
-              Tuf
-            </button>
           </div>
         </div>
 
@@ -2255,138 +2240,6 @@ export default function App() {
                   >
                     <Check size={14} />
                     Sauvegarder &amp; Réinitialiser
-                  </button>
-                </div>
-              </motion.div>
-            </div>
-          )}
-          
-          {deleteTargetIndex !== null && (
-            <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4">
-              {/* Backdrop */}
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setDeleteTargetIndex(null)}
-                className="fixed inset-0 bg-slate-950/85 backdrop-blur-md"
-              />
-              
-              {/* Dialog Content */}
-              <motion.div 
-                initial={{ opacity: 0, scale: 0.95, y: 30 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 15 }}
-                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                className="relative bg-sleek-card border border-sleek-border w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl z-10 flex flex-col overflow-hidden text-left"
-                dir="ltr"
-              >
-                {/* Decorative border */}
-                <div className="absolute top-0 inset-x-0 h-1.5 bg-red-500" />
-                
-                <div className="flex items-center gap-4 border-b border-sleek-border/50 pb-5 mb-5 justify-between flex-row">
-                  <div className="flex flex-col text-left">
-                    <h3 className="text-xl font-black text-sleek-text-main flex items-center gap-2 justify-start">
-                      Supprimer la Sauvegarde
-                    </h3>
-                    <p className="text-[10px] uppercase font-bold text-red-500 tracking-wider">Hassle-free deletion</p>
-                  </div>
-                  <div className="p-3 bg-red-500/10 rounded-2xl text-red-500">
-                    <Trash2 size={24} className="animate-pulse" />
-                  </div>
-                </div>
-
-                <div className="space-y-4 text-sm text-sleek-text-muted/90 flex flex-col font-medium leading-relaxed">
-                  <p className="text-xs bg-red-500/5 text-red-400 border border-red-500/10 rounded-2xl p-4 text-left leading-relaxed font-black font-sans">
-                    Voulez-vous supprimer cette sauvegarde ? Cette action est définitive.
-                    <br /><br />
-                    <span className="text-slate-200">Nom : {history[deleteTargetIndex]?.saveName || "Sauvegarde sans nom"}</span>
-                  </p>
-                </div>
-
-                {/* Confirm & Cancel Actions */}
-                <div className="flex gap-3 mt-8 border-t border-sleek-border/40 pt-5 flex-row">
-                  <button 
-                    onClick={() => setDeleteTargetIndex(null)}
-                    className="flex-1 py-4 text-xs bg-sleek-bg border border-sleek-border rounded-xl font-bold uppercase tracking-wider text-sleek-text-muted hover:border-white/20 hover:text-sleek-text-main transition-all active:scale-95"
-                  >
-                    Annuler
-                  </button>
-                  <button 
-                    onClick={() => {
-                      setHistory(prev => (prev || []).filter((_, i) => i !== deleteTargetIndex));
-                      showToast("Supprimé", "success");
-                      setDeleteTargetIndex(null);
-                    }}
-                    className="flex-1 py-4 text-xs bg-red-600 hover:bg-red-700 text-white rounded-xl font-black uppercase tracking-wider shadow-xl shadow-red-600/30 transition-all flex items-center justify-center gap-2 active:scale-95"
-                  >
-                    <Check size={14} />
-                    Supprimer
-                  </button>
-                </div>
-              </motion.div>
-            </div>
-          )}
-
-          {isClearHistoryOpen && (
-            <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4">
-              {/* Backdrop */}
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setIsClearHistoryOpen(false)}
-                className="fixed inset-0 bg-slate-950/85 backdrop-blur-md"
-              />
-              
-              {/* Dialog Content */}
-              <motion.div 
-                initial={{ opacity: 0, scale: 0.95, y: 30 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 15 }}
-                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                className="relative bg-sleek-card border border-sleek-border w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl z-10 flex flex-col overflow-hidden text-left"
-                dir="ltr"
-              >
-                {/* Decorative border */}
-                <div className="absolute top-0 inset-x-0 h-1.5 bg-red-500" />
-                
-                <div className="flex items-center gap-4 border-b border-sleek-border/50 pb-5 mb-5 justify-between flex-row">
-                  <div className="flex flex-col text-left">
-                    <h3 className="text-xl font-black text-sleek-text-main flex items-center gap-2 justify-start">
-                      Vider l'Historique
-                    </h3>
-                    <p className="text-[10px] uppercase font-bold text-red-500 tracking-wider">Clear all content</p>
-                  </div>
-                  <div className="p-3 bg-red-500/10 rounded-2xl text-red-500">
-                    <Trash2 size={24} className="animate-pulse" />
-                  </div>
-                </div>
-
-                <div className="space-y-4 text-sm text-sleek-text-muted/90 flex flex-col font-medium leading-relaxed">
-                  <p className="text-xs bg-red-500/5 text-red-400 border border-red-500/10 rounded-2xl p-4 text-left leading-relaxed font-black font-sans">
-                    Voulez-vous vraiment vider tout l'historique ? Toutes les sauvegardes de version seront perdues pour toujours.
-                  </p>
-                </div>
-
-                {/* Confirm & Cancel Actions */}
-                <div className="flex gap-3 mt-8 border-t border-sleek-border/40 pt-5 flex-row">
-                  <button 
-                    onClick={() => setIsClearHistoryOpen(false)}
-                    className="flex-1 py-4 text-xs bg-sleek-bg border border-sleek-border rounded-xl font-bold uppercase tracking-wider text-sleek-text-muted hover:border-white/20 hover:text-sleek-text-main transition-all active:scale-95"
-                  >
-                    Annuler
-                  </button>
-                  <button 
-                    onClick={() => {
-                      setHistory([]);
-                      showToast("Historique vidé", "success");
-                      setIsClearHistoryOpen(false);
-                    }}
-                    className="flex-1 py-4 text-xs bg-red-600 hover:bg-red-700 text-white rounded-xl font-black uppercase tracking-wider shadow-xl shadow-red-600/30 transition-all flex items-center justify-center gap-2 active:scale-95"
-                  >
-                    <Check size={14} />
-                    Vider
                   </button>
                 </div>
               </motion.div>
@@ -5289,28 +5142,96 @@ export default function App() {
                 transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
                 className="flex-1 overflow-y-auto pr-2 custom-scrollbar pb-10"
               >
-                <div className="max-w-4xl mx-auto">
+                <div className="max-w-4xl mx-auto space-y-8">
+                  
+                  {/* Cloud Connection Panel */}
+                  <div className="bg-sleek-card rounded-[2.5rem] p-8 border border-sleek-border shadow-xl relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl -z-10" />
+                    <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl -z-10" />
+                    
+                    {!fbUser ? (
+                      <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2.5">
+                            <span className="bg-indigo-500/15 text-indigo-500 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider font-mono flex items-center gap-1">
+                              <Cloud className="animate-bounce" size={10} /> Nouveau : Synchronisation Cloud
+                            </span>
+                          </div>
+                          <h3 className="text-xl font-bold text-sleek-text-main">
+                            Conserver vos scénarios même après déploiement sur Vercel
+                          </h3>
+                          <p className="text-xs text-sleek-text-muted max-w-xl leading-relaxed">
+                            Connectez-vous pour sauvegarder vos calculs dans une base de données cloud sécurisée. Vous pourrez recharger vos simulations de n'importe où, sur n'importe quel appareil, même après la conversion en site web de production.
+                          </p>
+                        </div>
+                        <button
+                          onClick={handleGoogleSignIn}
+                          className="flex items-center gap-2.5 px-6 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black uppercase tracking-widest rounded-2xl shadow-lg shadow-indigo-600/20 active:scale-95 transition-all w-full md:w-auto justify-center cursor-pointer"
+                        >
+                          <LogIn size={15} />
+                          Se connecter avec Google
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                        <div className="flex items-center gap-4">
+                          {fbUser.photoURL ? (
+                            <img src={fbUser.photoURL} alt="Avatar" className="w-14 h-14 rounded-full border-2 border-indigo-500/20 shadow-inner" />
+                          ) : (
+                            <div className="w-14 h-14 bg-indigo-500/10 text-indigo-600 rounded-full flex items-center justify-center font-black text-xl">
+                              {fbUser.displayName?.charAt(0) || "U"}
+                            </div>
+                          )}
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-bold text-sleek-text-main">{fbUser.displayName}</span>
+                              <span className="bg-emerald-500/10 text-emerald-600 text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-emerald-500/20 flex items-center gap-1 shadow-sm font-mono">
+                                <Cloud size={8} /> Connecté Cloud
+                              </span>
+                            </div>
+                            <p className="text-xs text-sleek-text-muted font-mono">{fbUser.email}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                          <button
+                            onClick={handleSyncLocalToCloud}
+                            disabled={isCloudLoading}
+                            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border border-indigo-500/20"
+                            title="Téléverser l'historique de cet ordinateur vers votre espace sésurisé en ligne"
+                          >
+                            <RefreshCw size={13} className={isCloudLoading ? "animate-spin" : ""} />
+                            Sync locales ➔ Cloud
+                          </button>
+                          
+                          <button
+                            onClick={handleSignOut}
+                            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-red-500/5 hover:bg-red-500/10 text-red-500 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border border-red-500/20"
+                          >
+                            <LogOut size={13} />
+                            Se déconnecter
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Master Backup Card */}
                   <div className="bg-sleek-card rounded-[2.5rem] p-10 border border-sleek-border shadow-xl">
                     <div className="flex items-center justify-between mb-8">
                        <h2 className="text-2xl font-black text-sleek-text-main flex items-center gap-3">
                          <div className="w-10 h-10 bg-indigo-500/10 rounded-xl flex items-center justify-center text-indigo-600">
                            <History size={20} />
                          </div>
-                         Historique des Sauvegardes
+                         Création d'une version
                        </h2>
-                       <button 
-                         onClick={() => setIsClearHistoryOpen(true)}
-                         className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-red-500 hover:bg-red-500/10 rounded-xl transition-all border border-red-500/20"
-                       >
-                         Vider l'Historique
-                       </button>
                     </div>
 
-                    {/* Formulaire de Sauvegarde Météo - TCR GRANITE */}
+                    {/* Enregistrer la configuration actuelle - TCR GRANITE */}
                     <div className="bg-gradient-to-br from-indigo-500/5 to-purple-500/5 rounded-3xl p-6 border border-indigo-500/10 mb-8 shadow-sm">
                        <h3 className="text-xs font-bold text-indigo-500 uppercase tracking-widest mb-4 flex items-center gap-2">
                          <PlusCircle size={14} className="text-indigo-500 animate-pulse" />
-                         Enregistrer la configuration actuelle (حفظ مسمى)
+                         Nommer la simulation actuelle (حفظ مسمى)
                        </h3>
                        <div className="flex flex-col md:flex-row gap-4 items-end">
                          <div className="flex-1 space-y-1.5 w-full">
@@ -5327,101 +5248,219 @@ export default function App() {
                            <button 
                              type="button"
                              onClick={() => setCustomSaveName("TCR GRANITE")}
-                             className="flex-1 md:flex-initial px-3.5 py-2.5 bg-sleek-bg border border-sleek-border rounded-xl text-[9px] font-extrabold uppercase tracking-widest text-sleek-text-muted hover:border-emerald-500/40 hover:text-emerald-500 transition-all font-mono"
+                             className="flex-1 md:flex-initial px-3.5 py-2.5 bg-sleek-bg border border-sleek-border rounded-xl text-[9px] font-extrabold uppercase tracking-widest text-sleek-text-muted hover:border-emerald-500/40 hover:text-emerald-500 transition-all font-mono animate-none active:scale-95"
                            >
                              TCR GRANITE
                            </button>
                            <button 
                              type="button"
                              onClick={() => setCustomSaveName("TCR TUF")}
-                             className="flex-1 md:flex-initial px-3.5 py-2.5 bg-sleek-bg border border-sleek-border rounded-xl text-[9px] font-extrabold uppercase tracking-widest text-sleek-text-muted hover:border-indigo-500/40 hover:text-indigo-500 transition-all font-mono"
+                             className="flex-1 md:flex-initial px-3.5 py-2.5 bg-sleek-bg border border-sleek-border rounded-xl text-[9px] font-extrabold uppercase tracking-widest text-sleek-text-muted hover:border-indigo-500/40 hover:text-indigo-500 transition-all font-mono animate-none active:scale-95"
                            >
                              TCR TUF
                            </button>
                          </div>
-                         <button 
-                           onClick={() => {
-                             if (!customSaveName.trim()) {
-                               showToast("Veuillez entrer un nom", "error");
-                               return;
-                             }
-                             handleSave(customSaveName.trim());
-                           }}
-                           className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-indigo-600/25 hover:scale-[1.02] active:scale-95 transition-all w-full md:w-auto justify-center"
-                         >
-                           <Save size={14} />
-                           Enregistrer
-                         </button>
+                         
+                         <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                            <button 
+                              onClick={() => {
+                                if (!customSaveName.trim()) {
+                                  showToast("Veuillez entrer un nom", "error");
+                                  return;
+                                }
+                                handleSave(customSaveName.trim());
+                              }}
+                              className="flex items-center gap-2 px-5 py-2.5 bg-sleek-bg hover:bg-sleek-bg/80 border border-sleek-border text-sleek-text-main text-[10px] font-black uppercase tracking-widest rounded-xl hover:scale-[1.02] active:scale-95 transition-all justify-center cursor-pointer"
+                            >
+                              <Save size={14} className="text-sleek-text-muted" />
+                              Local (🖥️)
+                            </button>
+
+                            <button 
+                              onClick={() => {
+                                if (!fbUser) {
+                                  showToast("Veuillez vous connecter avec votre compte Google.", "error");
+                                  handleGoogleSignIn();
+                                  return;
+                                }
+                                if (!customSaveName.trim()) {
+                                  showToast("Veuillez entrer un nom", "error");
+                                  return;
+                                }
+                                handleSaveToCloud(customSaveName.trim());
+                              }}
+                              className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-indigo-600/25 hover:scale-[1.02] active:scale-95 transition-all justify-center cursor-pointer"
+                            >
+                              <Cloud size={14} />
+                              Cloud (☁️)
+                            </button>
+                         </div>
                        </div>
                     </div>
 
-                    {(!Array.isArray(history) || history.length === 0) ? (
-                       <div className="flex flex-col items-center justify-center py-20 bg-sleek-bg/50 rounded-3xl border border-dashed border-sleek-border/50">
-                         <Clock size={48} className="text-sleek-text-muted/20 mb-4" />
-                         <p className="text-sm font-bold text-sleek-text-muted opacity-40 uppercase tracking-widest">Aucune sauvegarde trouvée</p>
-                         <p className="text-[10px] text-sleek-text-muted opacity-30 mt-1 uppercase tracking-widest">Entrez un nom ci-dessus pour réaliser votre premier enregistrement</p>
-                       </div>
-                    ) : (
-                       <div className="space-y-4">
-                         {Array.isArray(history) && history.map((save, idx) => (
-                           <div key={idx} className="group relative bg-sleek-bg/40 border border-sleek-border hover:border-sleek-primary/30 hover:bg-sleek-card rounded-2xl p-6 transition-all shadow-sm hover:shadow-xl">
-                             <div className="flex items-center justify-between">
-                               <div className="flex flex-col gap-1.5">
-                                 <div className="flex items-center gap-2 flex-wrap">
-                                   {save.saveName ? (
-                                     <div className="flex items-center gap-1.5">
-                                       <span className="bg-indigo-500/10 text-indigo-600 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full border border-indigo-500/20 shadow-sm font-mono">
-                                         {save.saveName}
-                                       </span>
-                                       <span className="text-[10px] text-sleek-text-muted font-bold opacity-60">
-                                         ({new Date(save.lastSaved).toLocaleString('fr-DZ', { dateStyle: 'short', timeStyle: 'short' })})
-                                       </span>
-                                     </div>
-                                   ) : (
-                                     <span className="text-xs font-black text-sleek-text-main group-hover:text-sleek-primary transition-colors">
-                                       {new Date(save.lastSaved).toLocaleString('fr-DZ', { dateStyle: 'long', timeStyle: 'short' })}
-                                     </span>
-                                   )}
-                                   {idx === 0 && <span className="bg-emerald-500/10 text-emerald-600 text-[8px] font-black uppercase px-2 py-0.5 rounded-full border border-emerald-500/20">Dernière</span>}
-                                 </div>
-                                 <span className="text-[10px] text-sleek-text-muted font-bold opacity-60 uppercase tracking-widest">
-                                   {save.years?.length || 0} Ans • {save.equipments?.length || 0} Equipements • {save.roles?.length || 0} Employés
-                                 </span>
-                               </div>
-                               
-                               <div className="flex items-center gap-2">
-                                 <button 
-                                   onClick={() => restoreFromHistory(save)}
-                                   className="flex items-center gap-2 px-5 py-2.5 bg-sleek-primary text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-sleek-primary/20 hover:scale-105 active:scale-95 transition-all"
-                                 >
-                                   <Undo2 size={14} />
-                                   Restaurer
-                                 </button>
-                                 <button 
-                                   onClick={() => setDeleteTargetIndex(idx)} onAnimationEnd={() => {
-                                     if (false) {
-                                       setHistory(prev => (prev || []).filter((_, i) => i !== idx));
-                                       showToast("Supprimé");
-                                     }
-                                   }}
-                                   className="p-2.5 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all border border-red-500/20"
-                                 >
-                                   <Trash2 size={16} />
-                                 </button>
-                               </div>
-                             </div>
-                             
-                             {save.userNotes && (
-                               <div className="mt-4 pt-4 border-t border-sleek-border/50">
-                                 <p className="text-[10px] text-sleek-text-muted font-medium italic line-clamp-2">
-                                   Note: {save.userNotes}
-                                 </p>
-                               </div>
-                              )}
-                            </div>
-                          ))}
+                    {/* TWO COLYMNS / LISTS FOR SECURE DATABASE PREVIEW */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-10">
+                      
+                      {/* Left: Cloud Scenarios List */}
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between border-b border-sleek-border/70 pb-3">
+                          <h3 className="text-sm font-black text-sleek-text-main flex items-center gap-2">
+                            <span className="p-1.5 bg-indigo-500/10 rounded-lg text-indigo-600">
+                              <Cloud size={14} />
+                            </span>
+                            Scénarios Cloud (☁️ En Ligne)
+                          </h3>
+                          {fbUser && (
+                            <span className="text-[10px] font-extrabold text-sleek-text-muted font-mono bg-sleek-bg px-2.5 py-1 rounded-full border border-sleek-border shadow-sm">
+                              {cloudStudies.length} versions
+                            </span>
+                          )}
                         </div>
-                     )}
+
+                        {!fbUser ? (
+                          <div className="flex flex-col items-center justify-center p-8 bg-sleek-bg/20 rounded-2xl border border-dashed border-sleek-border/80 text-center space-y-3">
+                            <Cloud size={24} className="text-sleek-text-muted opacity-30" />
+                            <p className="text-[11px] font-bold text-sleek-text-muted opacity-80 uppercase tracking-widest leading-relaxed">
+                              🔒 Section Cloud Verrouillée
+                            </p>
+                            <span className="text-[9px] text-sleek-text-muted opacity-60 leading-normal block max-w-xs">
+                              Connectez-vous avec Google ci-dessus pour accéder à votre espace de stockage sécurisé et permanent.
+                            </span>
+                          </div>
+                        ) : isCloudLoading ? (
+                          <div className="flex flex-col items-center justify-center py-12">
+                            <RefreshCw className="animate-spin text-indigo-600 mb-2" size={24} />
+                            <span className="text-[9px] font-bold uppercase tracking-widest text-sleek-text-muted opacity-50">Chargement de la base cloud...</span>
+                          </div>
+                        ) : cloudStudies.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center py-10 bg-sleek-bg/20 rounded-2xl border border-dashed border-sleek-border/80 text-center">
+                            <Cloud size={24} className="text-indigo-600/20 mb-2" />
+                            <p className="text-[10px] font-bold text-sleek-text-muted opacity-60 uppercase tracking-widest">Aucune sauvegarde Cloud</p>
+                            <span className="text-[8px] text-sleek-text-muted opacity-40 mt-1 max-w-xs">Enregistrez un scénario Cloud ci-dessus ou importez vos configurations de cet ordi.</span>
+                          </div>
+                        ) : (
+                          <div className="space-y-3 max-h-[480px] overflow-y-auto pr-1">
+                            {cloudStudies.map((save) => (
+                              <div key={save.id} className="group relative bg-sleek-bg/40 border border-sleek-border hover:border-indigo-500/30 hover:bg-sleek-card rounded-2xl p-5 transition-all shadow-sm">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex flex-col gap-1.5">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="bg-indigo-500/10 text-indigo-600 text-[9px] font-black uppercase px-2.5 py-0.5 rounded-full border border-indigo-500/20 shadow-sm font-mono">
+                                        {save.saveName}
+                                      </span>
+                                      <span className="text-[9px] text-sleek-text-muted font-bold opacity-60 font-mono">
+                                        ({new Date(save.lastSaved).toLocaleString('fr-DZ', { dateStyle: 'short', timeStyle: 'short' })})
+                                      </span>
+                                    </div>
+                                    <span className="text-[8px] text-sleek-text-muted font-bold opacity-60 uppercase tracking-widest">
+                                      {save.years?.length || 0} Ans • {save.equipments?.length || 0} Equip. • {save.roles?.length || 0} RH
+                                    </span>
+                                  </div>
+                                  
+                                  <div className="flex items-center gap-1.5">
+                                    <button 
+                                      onClick={() => restoreFromHistory(save)}
+                                      className="flex items-center gap-1 px-3.5 py-2 bg-indigo-600 text-white text-[9px] font-black uppercase tracking-widest rounded-lg shadow-sm hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                                      title="Restaurer cette version en direct"
+                                    >
+                                      <Undo2 size={12} />
+                                      Charger
+                                    </button>
+                                    <button 
+                                      onClick={() => {
+                                        if (confirm("Voulez-vous supprimer ce scénario Cloud DEFINITIVEMENT ?\nهل تريد حذف هذه النسخة الاحتياطية السحابية نهائياً؟")) {
+                                          handleDeleteFromCloud(save.id);
+                                        }
+                                      }}
+                                      className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all border border-red-500/20 cursor-pointer"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Right: Local Storage Scenarios List */}
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between border-b border-sleek-border/70 pb-3">
+                          <h3 className="text-sm font-black text-sleek-text-main flex items-center gap-2">
+                            <span className="p-1.5 bg-emerald-500/10 rounded-lg text-emerald-600">
+                              <HardDrive size={14} />
+                            </span>
+                            Scénarios Locaux (🖥️ Ce Navigateur)
+                          </h3>
+                          <button 
+                            onClick={() => {
+                              if (confirm("Voulez-vous vraiment vider tout l'historique local ?\nهل تريد حقاً مسح سجل الحفظ بالكامل؟")) {
+                                setHistory([]);
+                                showToast("Historique local vidé");
+                              }
+                            }}
+                            className="text-[9px] font-bold uppercase tracking-wider text-red-500 hover:underline px-1 py-0.5"
+                          >
+                            Vider local
+                          </button>
+                        </div>
+
+                        {(!Array.isArray(history) || history.length === 0) ? (
+                          <div className="flex flex-col items-center justify-center py-10 bg-sleek-bg/20 rounded-2xl border border-dashed border-sleek-border/80 text-center">
+                            <Clock size={24} className="text-sleek-text-muted opacity-30 mb-2" />
+                            <p className="text-[10px] font-bold text-sleek-text-muted opacity-40 uppercase tracking-widest">Aucune sauvegarde locale</p>
+                            <span className="text-[8px] text-sleek-text-muted opacity-30 mt-1 max-w-xs">Réalisez un enregistrement local pour lister vos simulations ici.</span>
+                          </div>
+                        ) : (
+                          <div className="space-y-3 max-h-[480px] overflow-y-auto pr-1">
+                            {history.map((save, idx) => (
+                              <div key={idx} className="group relative bg-sleek-bg/40 border border-sleek-border hover:border-emerald-500/30 hover:bg-sleek-card rounded-2xl p-5 transition-all shadow-sm">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex flex-col gap-1.5">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="bg-emerald-500/10 text-emerald-600 text-[9px] font-black uppercase px-2.5 py-0.5 rounded-full border border-emerald-500/20 shadow-sm font-mono">
+                                        {save.saveName || "Simulation sans nom"}
+                                      </span>
+                                      <span className="text-[9px] text-sleek-text-muted font-bold opacity-60 font-mono">
+                                        ({new Date(save.lastSaved).toLocaleString('fr-DZ', { dateStyle: 'short', timeStyle: 'short' })})
+                                      </span>
+                                    </div>
+                                    <span className="text-[8px] text-sleek-text-muted font-bold opacity-60 uppercase tracking-widest">
+                                      {save.years?.length || 0} Ans • {save.equipments?.length || 0} Equip. • {save.roles?.length || 0} RH
+                                    </span>
+                                  </div>
+                                  
+                                  <div className="flex items-center gap-1.5">
+                                    <button 
+                                      onClick={() => restoreFromHistory(save)}
+                                      className="flex items-center gap-1 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-black uppercase tracking-widest rounded-lg shadow-sm hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                                      title="Restaurer cette version locale"
+                                    >
+                                      <Undo2 size={12} />
+                                      Charger
+                                    </button>
+                                    <button 
+                                      onClick={() => {
+                                        if (confirm("Voulez-vous supprimer cette sauvegarde locale ?")) {
+                                          setHistory(prev => (prev || []).filter((_, i) => i !== idx));
+                                          showToast("Supprimé");
+                                        }
+                                      }}
+                                      className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all border border-red-500/20 cursor-pointer"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                    </div>
+
                   </div>
                 </div>
               </motion.div>

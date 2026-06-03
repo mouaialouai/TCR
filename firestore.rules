@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // catch-all default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidStudy(study) {
+      return study.userId is string && study.userId.size() <= 128
+          && study.saveName is string && study.saveName.size() <= 200
+          && (study.get('userNotes', '') is string && study.get('userNotes', '').size() <= 100000)
+          && (study.get('years', []) is list)
+          && (study.get('equipments', []) is list)
+          && (study.get('roles', []) is list)
+          && (study.get('machines', []) is list)
+          && (study.get('electricityLines', []) is list)
+          && (study.get('lastSaved', '') is string);
+    }
+
+    match /studies/{studyId} {
+      allow read, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() 
+                    && isValidId(studyId)
+                    && isValidStudy(request.resource.data)
+                    && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn()
+                    && isValidId(studyId)
+                    && isValidStudy(request.resource.data)
+                    && resource.data.userId == request.auth.uid
+                    && request.resource.data.userId == resource.data.userId;
+    }
+  }
+}
